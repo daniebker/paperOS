@@ -1,23 +1,34 @@
 #pragma once
 
 #include <cstddef>
+#include <string>
 
 #include <paperos.h>
 
 // Sample app and template for new paperOS apps.
-// Shows "Hello, World!"; A / B cycle the greeting through a few languages to
-// show how an app receives input. Hold B returns to the home screen (handled
-// by the shell because onInput() does not consume Back).
+// Prints "Hello, World!" in several languages followed by "My name is <name>",
+// with the name read from the [owner] section of config.toml on the SD card:
+//
+//   [owner]
+//     name = "Dan"
+//
+// Hold B returns to the home screen (handled by the shell, since this app
+// does not override onInput()).
 class HelloWorldApp : public paperos::App {
  public:
-  const char* name() const override { return "Hello World"; }
+  explicit HelloWorldApp(const paperos::Config& config) : config_(config) {}
 
-  void onOpen() override;
-  bool onInput(paperos::InputEvent event) override;
+  const char* name() const override { return "Hello World"; }
   void draw(paperos::Display& display) override;
 
-  const char* greeting() const;
+  static size_t greetingCount();
+  static const char* greeting(size_t index);
+
+  // Owner's name from the config, or "" if it is not set.
+  const char* ownerName() const;
+  // "My name is <name>", or a hint when no name is configured.
+  std::string introduction() const;
 
  private:
-  size_t greetingIndex_ = 0;
+  const paperos::Config& config_;
 };

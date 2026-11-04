@@ -160,12 +160,68 @@ void test_empty_shell_ignores_input() {
   TEST_ASSERT_TRUE(display.shows("No apps installed"));
 }
 
+// --- Config ----------------------------------------------------------------
+
+void test_config_reads_owner_name() {
+  Config c;
+  TEST_ASSERT_TRUE(c.parse("[owner]\n  name = \"Dan\"\n"));
+  TEST_ASSERT_TRUE(c.has("owner", "name"));
+  TEST_ASSERT_EQUAL_STRING("Dan", c.getString("owner", "name"));
+}
+
+void test_config_sections_comments_and_value_kinds() {
+  Config c;
+  const char* text =
+      "\xEF\xBB\xBF# paperOS settings\r\n"
+      "version = 1\r\n"
+      "\r\n"
+      "[owner]   # who owns this device\r\n"
+      "  name = \"Dan \\\"The Man\\\" # not a comment\"  # trailing comment\r\n"
+      "  city = 'C:\\paper'\r\n"
+      "[ display ]\r\n"
+      "  dark = true\r\n";
+  TEST_ASSERT_TRUE(c.parse(text));
+  TEST_ASSERT_EQUAL_INT(0, c.errorCount());
+  TEST_ASSERT_EQUAL_STRING("1", c.getString("", "version"));
+  TEST_ASSERT_EQUAL_STRING("Dan \"The Man\" # not a comment", c.getString("owner", "name"));
+  TEST_ASSERT_EQUAL_STRING("C:\\paper", c.getString("owner", "city"));
+  TEST_ASSERT_EQUAL_STRING("true", c.getString("display", "dark"));
+  TEST_ASSERT_FALSE(c.has("display", "name"));  // keys are scoped to their section
+}
+
+void test_config_missing_values_use_fallback() {
+  Config c;
+  TEST_ASSERT_TRUE(c.parse(""));
+  TEST_ASSERT_EQUAL_STRING("nobody", c.getString("owner", "name", "nobody"));
+  TEST_ASSERT_EQUAL_STRING("", c.getString("owner", "name"));
+  TEST_ASSERT_EQUAL_STRING("x", c.getString(nullptr, nullptr, "x"));
+}
+
+void test_config_skips_bad_lines_and_keeps_good_ones() {
+  Config c;
+  TEST_ASSERT_FALSE(c.parse("[owner\nname = \"unterminated\ngarbage\n[owner]\nname = \"Dan\"\n"));
+  TEST_ASSERT_EQUAL_INT(3, c.errorCount());
+  TEST_ASSERT_EQUAL_INT(1, c.firstErrorLine());
+  TEST_ASSERT_EQUAL_STRING("Dan", c.getString("owner", "name"));
+}
+
+void test_config_last_definition_wins_and_parse_resets() {
+  Config c;
+  c.parse("[owner]\nname = \"A\"\nname = \"B\"\n");
+  TEST_ASSERT_EQUAL_STRING("B", c.getString("owner", "name"));
+  TEST_ASSERT_EQUAL_INT(1, c.size());
+  c.parse("");
+  TEST_ASSERT_FALSE(c.has("owner", "name"));
+}
+
 // --- HelloWorldApp ---------------------------------------------------------
 
 void test_hello_world_app_flow() {
+  Config config;
+  config.parse("[owner]\n  name = \"Dan\"\n");
   Shell shell;
   FakeDisplay display;
-  HelloWorldApp hello;
+  HelloWorldApp hello(config);
   shell.addApp(&hello);
   shell.draw(display);
   TEST_ASSERT_TRUE(display.shows("Hello World"));  // listed on the home screen
@@ -173,18 +229,26 @@ void test_hello_world_app_flow() {
   shell.handle(toInputEvent(Button::A, Gesture::LongPress));  // hold A: open
   TEST_ASSERT_TRUE(shell.activeApp() == &hello);
   shell.draw(display);
+  TEST_ASSERT_TRUE(HelloWorldApp::greetingCount() >= 2);
+  for (size_t i = 0; i < HelloWorldApp::greetingCount(); ++i) {
+    TEST_ASSERT_TRUE(display.shows(HelloWorldApp::greeting(i)));  // every language at once
+  }
   TEST_ASSERT_TRUE(display.shows("Hello, World!"));
-
-  TEST_ASSERT_TRUE(shell.handle(toInputEvent(Button::B, Gesture::ShortPress)));
-  shell.draw(display);
   TEST_ASSERT_TRUE(display.shows("Hallo, Welt!"));
+  TEST_ASSERT_TRUE(display.shows("My name is Dan"));
 
   shell.handle(toInputEvent(Button::B, Gesture::LongPress));  // hold B: exit
   TEST_ASSERT_TRUE(shell.activeApp() == nullptr);
+}
 
-  shell.handle(toInputEvent(Button::A, Gesture::LongPress));  // reopen resets greeting
-  shell.draw(display);
+void test_hello_world_app_without_owner_name() {
+  Config config;  // e.g. no SD card or no config.toml
+  HelloWorldApp hello(config);
+  FakeDisplay display;
+  display.beginFrame(Color::White);
+  hello.draw(display);
   TEST_ASSERT_TRUE(display.shows("Hello, World!"));
+  TEST_ASSERT_TRUE(display.shows("My name is not set yet"));
 }
 
 int main(int, char**) {
@@ -197,6 +261,12 @@ int main(int, char**) {
   RUN_TEST(test_select_opens_and_back_closes);
   RUN_TEST(test_menu_moves_use_fast_refresh);
   RUN_TEST(test_empty_shell_ignores_input);
+  RUN_TEST(test_config_reads_owner_name);
+  RUN_TEST(test_config_sections_comments_and_value_kinds);
+  RUN_TEST(test_config_missing_values_use_fallback);
+  RUN_TEST(test_config_skips_bad_lines_and_keeps_good_ones);
+  RUN_TEST(test_config_last_definition_wins_and_parse_resets);
   RUN_TEST(test_hello_world_app_flow);
+  RUN_TEST(test_hello_world_app_without_owner_name);
   return UNITY_END();
 }

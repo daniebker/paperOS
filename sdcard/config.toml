@@ -1,0 +1,5 @@
+# paperOS configuration.
+# Copy this file to the root of the PaperDIY's SD card as /config.toml.
+
+[owner]
+  name = "Dan"

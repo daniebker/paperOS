@@ -8,6 +8,7 @@
 #include <paperos.h>
 
 #include "M5Display.h"
+#include "SdConfig.h"
 
 // Apps
 #include <HelloWorldApp.h>
@@ -19,11 +20,12 @@ constexpr uint8_t kDisplayRotation = 1;
 constexpr uint32_t kLoopDelayMs = 10;
 
 M5Display* display = nullptr;
+paperos::Config config;  // loaded from /config.toml on the SD card in setup()
 paperos::Shell shell;
 paperos::GestureDetector buttonA;
 paperos::GestureDetector buttonB;
 
-HelloWorldApp helloWorldApp;
+HelloWorldApp helloWorldApp(config);
 
 void dispatch(paperos::Button button, paperos::Gesture gesture) {
   const paperos::InputEvent event = paperos::toInputEvent(button, gesture);
@@ -40,6 +42,8 @@ void setup() {
 
   static M5Display m5Display(M5.Display);
   display = &m5Display;
+
+  loadConfigFromSd(config);
 
   shell.addApp(&helloWorldApp);
 

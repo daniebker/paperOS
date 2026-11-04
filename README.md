@@ -16,6 +16,23 @@ The two side buttons handle all navigation:
 
 A hold counts as a long press once it reaches 600 ms. It fires while the button is still down.
 
+## Configuration
+
+At boot, paperOS reads `config.toml` from the root of the SD card. There's an example in [`sdcard/config.toml`](sdcard/config.toml):
+
+```toml
+[owner]
+  name = "Dan"
+```
+
+| Setting        | Used by     | Effect                                         |
+|----------------|-------------|------------------------------------------------|
+| `[owner] name` | Hello World | Shows "My name is <name>" under the greetings  |
+
+The file is only read at startup, so restart the device after changing it. If the card or file is missing, paperOS still starts and apps use their defaults.
+
+The parser supports a subset of TOML: `[section]` headers, `key = "string"`, `key = 'literal'`, bare values such as numbers and booleans, and `#` comments. Lines it can't parse are skipped and reported on the serial log. The display fonts are ASCII-only for now, so accented letters in the name won't render yet.
+
 ## Repository layout
 
 ```
@@ -23,13 +40,16 @@ platformio.ini            build configuration (PaperDIY firmware + native test e
 src/                      firmware entry point and M5Stack hardware glue
   main.cpp                boots the device, reads buttons, registers apps
   M5Display.{h,cpp}       paperos::Display implemented with M5GFX
+  SdConfig.{h,cpp}        mounts the SD card and loads /config.toml
 lib/paperos-core/         hardware-independent OS core
   src/paperos/App.h       base class every app implements
+  src/paperos/Config.*    config.toml parser and lookup
   src/paperos/Display.h   drawing interface apps render to
   src/paperos/Input.*     button -> gesture -> navigation event mapping
   src/paperos/Shell.*     home screen and app switching
 apps/                     one folder per app
   hello-world-app/        sample app
+sdcard/                   example files to copy onto the SD card
 test/                     host unit tests for the core and apps
 ```
 
@@ -60,6 +80,7 @@ The firmware uses [M5Unified](https://github.com/m5stack/M5Unified) 0.2.29 and [
    - Implement `name()` and `draw()`.
    - Override `onInput()` to react to `Previous` / `Next` / `Select`. Return `true` when the screen should be redrawn.
    - Leave `Back` unhandled (return `false`) to let the shell exit the app. Handle it yourself only to go back within the app, for example from a book to the library.
-3. In `src/main.cpp`, include the app header, create a static instance and call `shell.addApp(&yourApp)` in `setup()`.
+3. To read settings, take a `const paperos::Config&` in the constructor and call `config.getString("section", "key", "default")`. `HelloWorldApp` shows how.
+4. In `src/main.cpp`, include the app header, create a static instance and call `shell.addApp(&yourApp)` in `setup()`.
 
 PlatformIO finds everything under `apps/` automatically (`lib_extra_dirs = apps`).

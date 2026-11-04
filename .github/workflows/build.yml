@@ -1,0 +1,103 @@
+name: Build firmware
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+  # Reused by release.yml to build the binaries it publishes.
+  workflow_call:
+    outputs:
+      artifact:
+        description: Name of the uploaded firmware artifact
+        value: ${{ jobs.build.outputs.artifact }}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Unit tests (host)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Cache PlatformIO
+        uses: actions/cache@v5
+        with:
+          path: ~/.platformio
+          key: pio-native-${{ runner.os }}-${{ hashFiles('platformio.ini') }}
+          restore-keys: pio-native-${{ runner.os }}-
+
+      - name: Install PlatformIO
+        run: pip install -U platformio
+
+      - name: Run tests
+        run: pio test -e native
+
+  build:
+    name: Build PaperDIY firmware
+    runs-on: ubuntu-latest
+    outputs:
+      artifact: ${{ steps.artifact.outputs.name }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Cache PlatformIO
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.platformio
+            .pio/libdeps
+          key: pio-paperdiy-${{ runner.os }}-${{ hashFiles('platformio.ini') }}
+          restore-keys: pio-paperdiy-${{ runner.os }}-
+
+      - name: Install PlatformIO
+        run: pip install -U platformio
+
+      - name: Build
+        run: pio run -e paperdiy
+
+      - name: Collect binaries
+        run: |
+          set -euo pipefail
+          out=dist
+          build=.pio/build/paperdiy
+          mkdir -p "$out"
+          cp "$build/bootloader.bin" "$build/partitions.bin" "$build/firmware.bin" "$out/"
+          cp ~/.platformio/packages/framework-arduinoespressif32/tools/partitions/boot_app0.bin "$out/"
+
+          # Single image for web flashers and one-line esptool flashing (write at 0x0).
+          python ~/.platformio/packages/tool-esptoolpy/esptool.py --chip esp32s3 merge_bin \
+            -o "$out/paperOS-paperdiy-merged.bin" \
+            --flash_mode keep --flash_freq keep --flash_size keep \
+            0x0 "$out/bootloader.bin" \
+            0x8000 "$out/partitions.bin" \
+            0xe000 "$out/boot_app0.bin" \
+            0x10000 "$out/firmware.bin"
+
+          ls -l "$out"
+
+      - name: Name artifact
+        id: artifact
+        # On pull requests github.sha is the temporary merge commit; use the PR head instead.
+        run: echo "name=paperOS-paperdiy-${{ github.event.pull_request.head.sha || github.sha }}" >> "$GITHUB_OUTPUT"
+
+      - name: Upload firmware
+        uses: actions/upload-artifact@v6
+        with:
+          name: ${{ steps.artifact.outputs.name }}
+          path: dist/
+          if-no-files-found: error

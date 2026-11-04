@@ -1,0 +1,8 @@
+{
+  "name": "hello-world-app",
+  "version": "0.1.0",
+  "description": "paperOS sample app: shows Hello, World! and demonstrates input handling.",
+  "dependencies": { "paperos-core": "*" },
+  "frameworks": "*",
+  "platforms": "*"
+}

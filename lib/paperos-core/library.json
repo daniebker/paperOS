@@ -1,0 +1,7 @@
+{
+  "name": "paperos-core",
+  "version": "0.1.0",
+  "description": "Hardware-independent core of paperOS: input gestures, app API and the home-screen shell.",
+  "frameworks": "*",
+  "platforms": "*"
+}

@@ -1,0 +1,83 @@
+name: Release
+
+# Push a version tag to publish a release, e.g.
+#   git tag v0.1.0 && git push origin v0.1.0
+# Tags with a suffix such as v0.2.0-beta.1 are published as pre-releases.
+on:
+  push:
+    tags:
+      - "v[0-9]+.[0-9]+.[0-9]+"
+      - "v[0-9]+.[0-9]+.[0-9]+-*"
+
+permissions:
+  contents: read
+
+concurrency:
+  # Distinct from build.yml's group, which is named after this workflow when reused.
+  group: publish-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Test and build
+    uses: ./.github/workflows/build.yml
+
+  publish:
+    name: Publish GitHub release
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      TAG: ${{ github.ref_name }}
+    steps:
+      - name: Download firmware
+        uses: actions/download-artifact@v7
+        with:
+          name: ${{ needs.build.outputs.artifact }}
+          path: build
+
+      - name: Prepare release assets
+        run: |
+          set -euo pipefail
+          mkdir -p release
+          prefix="paperOS-${TAG}-paperdiy"
+          cp build/paperOS-paperdiy-merged.bin "release/${prefix}-merged.bin"
+          for f in bootloader partitions boot_app0 firmware; do
+            cp "build/${f}.bin" "release/${prefix}-${f}.bin"
+          done
+          (cd release && sha256sum -- *.bin > SHA256SUMS.txt)
+
+          cat > notes.md <<NOTES
+          ## Flashing
+
+          Easiest: flash the merged image at address \`0x0\` with [esptool](https://docs.espressif.com/projects/esptool/en/latest/esp32s3/):
+
+          \`\`\`bash
+          esptool.py --chip esp32s3 --port /dev/ttyACM0 --baud 921600 write_flash 0x0 ${prefix}-merged.bin
+          \`\`\`
+
+          Or flash the separate images: \`bootloader\` at \`0x0\`, \`partitions\` at \`0x8000\`, \`boot_app0\` at \`0xe000\` and \`firmware\` at \`0x10000\`.
+
+          If the upload can't connect, long-hold the power button to put the PaperDIY into download mode and try again. Check downloads against \`SHA256SUMS.txt\`. See the [README](https://github.com/${GH_REPO}/blob/${TAG}/README.md) for full instructions.
+          NOTES
+          ls -l release
+
+      - name: Publish release
+        run: |
+          set -euo pipefail
+          if gh release view "$TAG" > /dev/null 2>&1; then
+            # Re-run of the workflow: replace the assets on the existing release.
+            gh release upload "$TAG" release/* --clobber
+          else
+            prerelease=()
+            if [[ "$TAG" == *-* ]]; then prerelease=(--prerelease); fi
+            gh release create "$TAG" release/* \
+              --verify-tag \
+              --title "paperOS ${TAG}" \
+              --notes-file notes.md \
+              --generate-notes \
+              "${prerelease[@]}"
+          fi

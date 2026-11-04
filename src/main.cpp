@@ -9,8 +9,10 @@
 
 #include "M5Display.h"
 #include "SdConfig.h"
+#include "SdFileSystem.h"
 
 // Apps
+#include <EReaderApp.h>
 #include <HelloWorldApp.h>
 
 namespace {
@@ -22,6 +24,7 @@ constexpr uint32_t kLoopDelayMs = 10;
 
 M5Display* display = nullptr;
 paperos::Config config;  // loaded from /config.toml on the SD card in setup()
+SdFileSystem sdFileSystem;
 paperos::Shell shell;
 paperos::GestureDetector buttonA;
 paperos::GestureDetector buttonB;
@@ -46,7 +49,10 @@ void setup() {
 
   loadConfigFromSd(config);
 
+  static EReaderApp eReaderApp(sdFileSystem, m5Display);
+
   shell.addApp(&helloWorldApp);
+  shell.addApp(&eReaderApp);
 
   shell.draw(*display);
 }
@@ -56,5 +62,6 @@ void loop() {
   const uint32_t now = millis();
   dispatch(paperos::Button::A, buttonA.update(M5.BtnA.isPressed(), now));
   dispatch(paperos::Button::B, buttonB.update(M5.BtnB.isPressed(), now));
+  if (shell.tick()) shell.draw(*display);
   delay(kLoopDelayMs);
 }

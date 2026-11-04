@@ -37,6 +37,8 @@ bool Shell::handle(InputEvent event) {
   }
 }
 
+bool Shell::tick() { return active_ != nullptr && active_->tick(); }
+
 void Shell::open(App* app) {
   active_ = app;
   fullRefreshPending_ = true;

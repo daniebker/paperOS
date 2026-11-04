@@ -67,3 +67,7 @@ void M5Display::drawText(const char* text, int x, int y, TextSize size, TextAlig
 }
 
 int M5Display::textHeight(TextSize size) const { return gfx_.fontHeight(fontFor(size)); }
+
+int M5Display::textWidth(const char* text, TextSize size) const {
+  return gfx_.textWidth(text, fontFor(size));
+}

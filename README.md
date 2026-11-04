@@ -1,7 +1,7 @@
 # paperOS
 A firmware for the PaperDIY by M5Stack.
 
-paperOS is a small app launcher for the PaperDIY's 4.7" e-paper display, shown in portrait (540x960) by default. Planned apps include an e-reader, a to-do list and a calendar view. Right now it ships with a sample **Hello World** app. It greets you in five languages (press A / B to switch) and introduces the owner named in `config.toml`.
+paperOS is a small app launcher for the PaperDIY's 4.7" e-paper display, shown in portrait (540x960) by default. It ships with an **E-Reader** for EPUB books and a sample **Hello World** app, which greets you in five languages (press A / B to switch) and introduces the owner named in `config.toml`. Planned apps include a to-do list and a calendar view.
 
 ## Controls
 
@@ -15,6 +15,29 @@ The two side buttons handle all navigation:
 | Hold **B**   | –                    | Exit the app, back to home screen  |
 
 A hold counts as a long press once it reaches 600 ms. It fires while the button is still down.
+
+## E-Reader
+
+Copy `.epub` files into a `books` folder on the SD card, then open **E-Reader** from the home screen. Books are listed by title with the pages you have left.
+
+| Input        | Library              | Reading a book       |
+|--------------|----------------------|----------------------|
+| Press **A**  | Move selection up    | Previous page        |
+| Press **B**  | Move selection down  | Next page            |
+| Hold **A**   | Open selected book   | –                    |
+| Hold **B**   | Back to home screen  | Back to the library  |
+
+The first time you open a book, paperOS indexes it: it extracts the text and lays it out into pages for this screen. A progress bar shows how far along it is, and holding B cancels. The result is cached on the SD card, so the book opens straight away after that.
+
+Your place is saved on every page turn, so you can switch off at any time. The bottom of each page shows your position and the pages remaining, for example `Page 41 of 635` and `594 pages left`.
+
+Good to know:
+
+- The cache lives in `/books/.cache`, along with your saved places. It's safe to delete, but books will need indexing again and will restart from page 1.
+- Replacing a book with a different file starts it again from page 1.
+- Text only. Images are skipped, so books made of scanned pages show "This book has no readable text".
+- The display fonts are ASCII-only, so curly quotes and dashes become plain ones and accents are dropped (`café` shows as `cafe`). Scripts with no ASCII equivalent, such as Cyrillic, Greek or CJK, show as `?`.
+- DRM-protected books can't be read.
 
 ## Configuration
 
@@ -41,13 +64,16 @@ src/                      firmware entry point and M5Stack hardware glue
   main.cpp                boots the device, reads buttons, registers apps
   M5Display.{h,cpp}       paperos::Display implemented with M5GFX
   SdConfig.{h,cpp}        mounts the SD card and loads /config.toml
+  SdFileSystem.{h,cpp}    paperos::FileSystem implemented with the SD library
 lib/paperos-core/         hardware-independent OS core
   src/paperos/App.h       base class every app implements
   src/paperos/Config.*    config.toml parser and lookup
   src/paperos/Display.h   drawing interface apps render to
+  src/paperos/FileSystem.h  storage interface used by apps
   src/paperos/Input.*     button -> gesture -> navigation event mapping
   src/paperos/Shell.*     home screen and app switching
 apps/                     one folder per app
+  ereader-app/            EPUB reader
   hello-world-app/        sample app
 sdcard/                   example files to copy onto the SD card
 .github/workflows/        CI: tests + firmware build, and releases on version tags
@@ -112,7 +138,8 @@ When the upload finishes, the device restarts into paperOS and shows the home sc
 
 1. Copy [`sdcard/config.toml`](sdcard/config.toml) to the root of a FAT32-formatted microSD card.
 2. Edit `name` to your own.
-3. Insert the card and restart the device.
+3. Create a `books` folder on the card and copy your `.epub` files into it.
+4. Insert the card and restart the device.
 
 ### 6. Watch the logs (optional)
 

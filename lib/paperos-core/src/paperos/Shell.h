@@ -18,12 +18,19 @@ class Shell {
   // Feeds one input event. Returns true if the screen needs redrawing.
   bool handle(InputEvent event);
 
+  // Gives the open app time to work. Returns true if the screen needs redrawing.
+  bool tick();
+
   // Renders the home screen or the open app.
   void draw(Display& display);
 
   // Refresh mode for the next frame: a quality refresh after switching
-  // between home and an app to clear e-paper ghosting, fast otherwise.
-  Refresh nextRefresh() const { return fullRefreshPending_ ? Refresh::Quality : Refresh::Fast; }
+  // between home and an app to clear e-paper ghosting, or when the open app
+  // asks for one; fast otherwise.
+  Refresh nextRefresh() const {
+    const bool appWantsFull = active_ != nullptr && active_->wantsFullRefresh();
+    return fullRefreshPending_ || appWantsFull ? Refresh::Quality : Refresh::Fast;
+  }
 
   size_t appCount() const { return appCount_; }
   size_t selectedIndex() const { return selected_; }

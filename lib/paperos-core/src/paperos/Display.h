@@ -43,6 +43,8 @@ class Display {
                         Color color = Color::Black) = 0;
   // Line height in pixels for a given text size.
   virtual int textHeight(TextSize size) const = 0;
+  // Width in pixels of `text` at a given text size.
+  virtual int textWidth(const char* text, TextSize size) const = 0;
 };
 
 }  // namespace paperos

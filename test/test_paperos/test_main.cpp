@@ -4,6 +4,7 @@
 #include <paperos.h>
 #include <HelloWorldApp.h>
 
+#include <cstring>
 #include <string>
 #include <vector>
 
@@ -28,6 +29,7 @@ class FakeDisplay : public Display {
     texts.emplace_back(text);
   }
   int textHeight(TextSize) const override { return 30; }
+  int textWidth(const char* text, TextSize) const override { return 10 * int(strlen(text)); }
 
   bool shows(const char* text) const {
     for (const auto& t : texts)
@@ -50,6 +52,20 @@ class CountingApp : public App {
   const char* name_;
   int opened = 0;
   int closed = 0;
+};
+
+class WorkingApp : public App {
+ public:
+  const char* name() const override { return "Working"; }
+  bool tick() override {
+    ++ticks;
+    return redraw;
+  }
+  bool wantsFullRefresh() const override { return full; }
+  void draw(Display&) override {}
+  int ticks = 0;
+  bool redraw = false;
+  bool full = false;
 };
 
 #define ASSERT_ENUM(expected, actual) TEST_ASSERT_EQUAL_INT((int)(expected), (int)(actual))
@@ -281,6 +297,38 @@ void test_hello_world_app_without_owner_name() {
   TEST_ASSERT_EQUAL_STRING("Name is not set yet", hello.introduction().c_str());
 }
 
+void test_shell_ticks_only_the_open_app() {
+  Shell shell;
+  WorkingApp app;
+  shell.addApp(&app);
+  TEST_ASSERT_FALSE(shell.tick());
+  TEST_ASSERT_EQUAL(0, app.ticks);
+
+  shell.handle(InputEvent::Select);
+  TEST_ASSERT_FALSE(shell.tick());
+  app.redraw = true;
+  TEST_ASSERT_TRUE(shell.tick());
+  TEST_ASSERT_EQUAL(2, app.ticks);
+
+  shell.handle(InputEvent::Back);
+  TEST_ASSERT_FALSE(shell.tick());
+  TEST_ASSERT_EQUAL(2, app.ticks);
+}
+
+void test_app_can_request_a_quality_refresh() {
+  Shell shell;
+  WorkingApp app;
+  FakeDisplay display;
+  shell.addApp(&app);
+  shell.handle(InputEvent::Select);
+  shell.draw(display);
+  ASSERT_ENUM(Refresh::Fast, shell.nextRefresh());
+  app.full = true;
+  ASSERT_ENUM(Refresh::Quality, shell.nextRefresh());
+  shell.draw(display);
+  ASSERT_ENUM(Refresh::Quality, display.lastRefresh);
+}
+
 int main(int, char**) {
   UNITY_BEGIN();
   RUN_TEST(test_short_press_fires_on_release);
@@ -298,5 +346,7 @@ int main(int, char**) {
   RUN_TEST(test_config_last_definition_wins_and_parse_resets);
   RUN_TEST(test_hello_world_app_flow);
   RUN_TEST(test_hello_world_app_without_owner_name);
+  RUN_TEST(test_shell_ticks_only_the_open_app);
+  RUN_TEST(test_app_can_request_a_quality_refresh);
   return UNITY_END();
 }

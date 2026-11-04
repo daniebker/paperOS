@@ -4,5 +4,6 @@
 #include "paperos/App.h"
 #include "paperos/Config.h"
 #include "paperos/Display.h"
+#include "paperos/FileSystem.h"
 #include "paperos/Input.h"
 #include "paperos/Shell.h"

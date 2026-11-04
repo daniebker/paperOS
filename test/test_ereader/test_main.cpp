@@ -12,7 +12,9 @@
 #include <paperos.h>
 
 #include <algorithm>
+#include <cstdlib>
 #include <cstring>
+#include <iterator>
 #include <map>
 #include <string>
 #include <vector>
@@ -34,9 +36,8 @@ class FakeDisplay : public Display {
   void fillRect(int, int, int, int, Color) override {}
   void drawRect(int, int, int, int, Color) override {}
   void drawLine(int, int, int, int, Color) override {}
-  void drawText(const char* text, int, int y, TextSize, TextAlign, Color) override {
+  void drawText(const char* text, int, int, TextSize, TextAlign, Color) override {
     texts.emplace_back(text);
-    lowestY = std::max(lowestY, y);
   }
   int textHeight(TextSize size) const override {
     return size == TextSize::Small ? 30 : size == TextSize::ExtraLarge ? 60 : 45;
@@ -56,12 +57,17 @@ class FakeDisplay : public Display {
   }
 
   std::vector<std::string> texts;
-  int lowestY = 0;
   Refresh lastRefresh = Refresh::Fast;
 
  private:
   int w_;
   int h_;
+};
+
+class FakeBattery : public Battery {
+ public:
+  int level() const override { return charge; }
+  int charge = 87;
 };
 
 // In-memory FileSystem. Paths in `files` are absolute; directories exist
@@ -346,10 +352,15 @@ void closeBookToLibrary(EReaderApp& app) {
   app.onInput(InputEvent::Select);
 }
 
-// From the book: opens the menu, picks an item and lets any indexing finish.
-void chooseFromMenu(EReaderApp& app, EReaderApp::MenuItem item) {
+// From the book: changes a setting through its preview and lets any indexing
+// finish. Positive steps increase it (A), negative decrease it (B).
+void changeSetting(EReaderApp& app, EReaderApp::MenuItem item, int steps) {
   app.onInput(InputEvent::Back);
-  for (int i = 0; i < int(item); ++i) app.onInput(InputEvent::Next);
+  if (item == EReaderApp::MenuItem::LineHeight) app.onInput(InputEvent::Next);
+  app.onInput(InputEvent::Select);
+  for (int i = 0; i < abs(steps); ++i) {
+    app.onInput(steps > 0 ? InputEvent::Previous : InputEvent::Next);
+  }
   app.onInput(InputEvent::Select);
   finishIndexing(app);
 }
@@ -375,6 +386,7 @@ struct Fixture {
   }
   MemoryFileSystem fs;
   FakeDisplay display;
+  FakeBattery battery;
 };
 
 #define ASSERT_VIEW(expected, app) \
@@ -675,7 +687,7 @@ void test_library_lists_only_epubs_sorted_by_title() {
   f.fs.files["/books/.epub"] = "x";
   f.fs.files["/other/outside.epub"] = "x";
 
-  EReaderApp app(f.fs, f.display);
+  EReaderApp app(f.fs, f.display, f.battery);
   app.onOpen();
   TEST_ASSERT_EQUAL(3, app.books().size());
   TEST_ASSERT_EQUAL_STRING("Apple", app.books()[0].title.c_str());
@@ -697,7 +709,7 @@ void test_library_scrolls_a_screen_at_a_time() {
   Fixture f;
   f.fs.files.clear();
   for (int i = 10; i < 40; ++i) f.fs.files["/books/" + std::to_string(i) + ".epub"] = "x";
-  EReaderApp app(f.fs, f.display);
+  EReaderApp app(f.fs, f.display, f.battery);
   app.onOpen();
   app.draw(f.display);
   TEST_ASSERT_TRUE(f.display.shows("10"));
@@ -712,7 +724,8 @@ void test_library_scrolls_a_screen_at_a_time() {
 void test_library_explains_a_missing_folder_or_no_books() {
   MemoryFileSystem fs;
   FakeDisplay display;
-  EReaderApp app(fs, display);
+  FakeBattery battery;
+  EReaderApp app(fs, display, battery);
   app.onOpen();
   app.draw(display);
   TEST_ASSERT_TRUE(display.shows("No /books folder"));
@@ -728,7 +741,7 @@ void test_library_explains_a_missing_folder_or_no_books() {
 
 void test_first_open_indexes_then_shows_the_first_page() {
   Fixture f;
-  EReaderApp app(f.fs, f.display);
+  EReaderApp app(f.fs, f.display, f.battery);
   app.onOpen();
   TEST_ASSERT_TRUE(app.onInput(InputEvent::Select));
   ASSERT_VIEW(Indexing, app);
@@ -757,7 +770,7 @@ void test_first_open_indexes_then_shows_the_first_page() {
 void test_second_open_uses_the_cache_without_touching_the_epub() {
   Fixture f;
   {
-    EReaderApp app(f.fs, f.display);
+    EReaderApp app(f.fs, f.display, f.battery);
     app.onOpen();
     app.onInput(InputEvent::Select);
     finishIndexing(app);
@@ -766,7 +779,7 @@ void test_second_open_uses_the_cache_without_touching_the_epub() {
   f.fs.files[kBookPath] = std::string(size, 'x');  // unreadable, but same name and size
   f.fs.opens.clear();
 
-  EReaderApp app(f.fs, f.display);
+  EReaderApp app(f.fs, f.display, f.battery);
   app.onOpen();
   TEST_ASSERT_TRUE(app.onInput(InputEvent::Select));
   ASSERT_VIEW(Reading, app);
@@ -776,7 +789,7 @@ void test_second_open_uses_the_cache_without_touching_the_epub() {
 
 void test_every_page_of_every_chapter_can_be_read() {
   Fixture f;
-  EReaderApp app(f.fs, f.display);
+  EReaderApp app(f.fs, f.display, f.battery);
   app.onOpen();
   app.onInput(InputEvent::Select);
   finishIndexing(app);
@@ -801,7 +814,7 @@ void test_every_page_of_every_chapter_can_be_read() {
 
 void test_page_turns_stop_at_both_ends() {
   Fixture f;
-  EReaderApp app(f.fs, f.display);
+  EReaderApp app(f.fs, f.display, f.battery);
   app.onOpen();
   app.onInput(InputEvent::Select);
   finishIndexing(app);
@@ -819,7 +832,7 @@ void test_last_page_is_remembered_across_restarts() {
   Fixture f;
   uint32_t total = 0;
   {
-    EReaderApp app(f.fs, f.display);
+    EReaderApp app(f.fs, f.display, f.battery);
     app.onOpen();
     app.onInput(InputEvent::Select);
     finishIndexing(app);
@@ -828,7 +841,7 @@ void test_last_page_is_remembered_across_restarts() {
     // No Back: the device can be switched off at any time.
   }
 
-  EReaderApp app(f.fs, f.display);
+  EReaderApp app(f.fs, f.display, f.battery);
   app.onOpen();
   TEST_ASSERT_EQUAL(2, app.books()[0].page);
   TEST_ASSERT_EQUAL(total, app.books()[0].pageCount);
@@ -845,7 +858,7 @@ void test_last_page_is_remembered_across_restarts() {
 
 void test_back_returns_to_library_and_updates_progress() {
   Fixture f;
-  EReaderApp app(f.fs, f.display);
+  EReaderApp app(f.fs, f.display, f.battery);
   app.onOpen();
   app.onInput(InputEvent::Select);
   finishIndexing(app);
@@ -860,7 +873,7 @@ void test_back_returns_to_library_and_updates_progress() {
 
 void test_finished_book_shows_as_finished() {
   Fixture f;
-  EReaderApp app(f.fs, f.display);
+  EReaderApp app(f.fs, f.display, f.battery);
   app.onOpen();
   app.onInput(InputEvent::Select);
   finishIndexing(app);
@@ -873,7 +886,7 @@ void test_finished_book_shows_as_finished() {
 
 void test_saved_position_past_the_end_is_clamped() {
   Fixture f;
-  EReaderApp app(f.fs, f.display);
+  EReaderApp app(f.fs, f.display, f.battery);
   app.onOpen();
   app.onInput(InputEvent::Select);
   finishIndexing(app);
@@ -889,7 +902,7 @@ void test_saved_position_past_the_end_is_clamped() {
 
 void test_cancel_leaves_no_index_behind() {
   Fixture f;
-  EReaderApp app(f.fs, f.display);
+  EReaderApp app(f.fs, f.display, f.battery);
   app.onOpen();
   app.onInput(InputEvent::Select);
   app.tick();
@@ -908,7 +921,7 @@ void test_cancel_leaves_no_index_behind() {
 void test_interrupted_index_is_ignored_and_rebuilt() {
   Fixture f;
   {
-    EReaderApp app(f.fs, f.display);
+    EReaderApp app(f.fs, f.display, f.battery);
     app.onOpen();
     app.onInput(InputEvent::Select);
     finishIndexing(app);
@@ -920,7 +933,7 @@ void test_interrupted_index_is_ignored_and_rebuilt() {
     }
   }
 
-  EReaderApp app(f.fs, f.display);
+  EReaderApp app(f.fs, f.display, f.battery);
   app.onOpen();
   TEST_ASSERT_EQUAL(0, app.books()[0].pageCount);
   app.onInput(InputEvent::Select);
@@ -933,7 +946,7 @@ void test_changed_layout_reindexes_the_book() {
   Fixture f;
   uint32_t oldTotal = 0;
   {
-    EReaderApp app(f.fs, f.display);
+    EReaderApp app(f.fs, f.display, f.battery);
     app.onOpen();
     app.onInput(InputEvent::Select);
     finishIndexing(app);
@@ -942,7 +955,7 @@ void test_changed_layout_reindexes_the_book() {
   }
 
   FakeDisplay narrower(300, 960);
-  EReaderApp app(f.fs, narrower);
+  EReaderApp app(f.fs, narrower, f.battery);
   app.onOpen();
   app.onInput(InputEvent::Select);
   ASSERT_VIEW(Indexing, app);
@@ -955,7 +968,7 @@ void test_changed_layout_reindexes_the_book() {
 void test_replacing_a_book_starts_it_over() {
   Fixture f;
   {
-    EReaderApp app(f.fs, f.display);
+    EReaderApp app(f.fs, f.display, f.battery);
     app.onOpen();
     app.onInput(InputEvent::Select);
     finishIndexing(app);
@@ -963,7 +976,7 @@ void test_replacing_a_book_starts_it_over() {
   }
   f.fs.files[kBookPath] = makeEpub(60);
 
-  EReaderApp app(f.fs, f.display);
+  EReaderApp app(f.fs, f.display, f.battery);
   app.onOpen();
   TEST_ASSERT_EQUAL(0, app.books()[0].pageCount);
   app.onInput(InputEvent::Select);
@@ -975,7 +988,7 @@ void test_replacing_a_book_starts_it_over() {
 void test_bad_books_show_an_error_and_recover() {
   Fixture f;
   f.fs.files[kBookPath] = "this is not a zip file";
-  EReaderApp app(f.fs, f.display);
+  EReaderApp app(f.fs, f.display, f.battery);
   app.onOpen();
   app.onInput(InputEvent::Select);
   ASSERT_VIEW(Error, app);
@@ -996,7 +1009,7 @@ void test_corrupt_chapter_fails_indexing_cleanly() {
   zip.addDeflated("OEBPS/a.xhtml", std::string(100, char(0xFF)), 500);
   f.fs.files[kBookPath] = zip.finish();
 
-  EReaderApp app(f.fs, f.display);
+  EReaderApp app(f.fs, f.display, f.battery);
   app.onOpen();
   app.onInput(InputEvent::Select);
   finishIndexing(app);
@@ -1016,7 +1029,7 @@ void test_book_without_text_fails_cleanly() {
   zip.addStored("OEBPS/a.xhtml", "<html><body><img src='page.jpg'/></body></html>");
   f.fs.files[kBookPath] = zip.finish();
 
-  EReaderApp app(f.fs, f.display);
+  EReaderApp app(f.fs, f.display, f.battery);
   app.onOpen();
   app.onInput(InputEvent::Select);
   finishIndexing(app);
@@ -1027,7 +1040,7 @@ void test_book_without_text_fails_cleanly() {
 
 void test_full_sd_card_fails_indexing_cleanly() {
   Fixture f;
-  EReaderApp app(f.fs, f.display);
+  EReaderApp app(f.fs, f.display, f.battery);
   app.onOpen();
   f.fs.failWrites = true;
   app.onInput(InputEvent::Select);
@@ -1040,7 +1053,7 @@ void test_quality_refresh_clears_ghosting_periodically() {
   Fixture f;
   f.fs.files[kBookPath] = makeEpub(200);
   Shell shell;
-  EReaderApp app(f.fs, f.display);
+  EReaderApp app(f.fs, f.display, f.battery);
   shell.addApp(&app);
   shell.draw(f.display);
   shell.handle(InputEvent::Select);  // opens the library
@@ -1064,7 +1077,7 @@ void test_quality_refresh_clears_ghosting_periodically() {
 
 void test_hold_b_opens_the_menu_and_closes_it_again() {
   Fixture f;
-  EReaderApp app(f.fs, f.display);
+  EReaderApp app(f.fs, f.display, f.battery);
   app.onOpen();
   app.onInput(InputEvent::Select);
   finishIndexing(app);
@@ -1075,10 +1088,9 @@ void test_hold_b_opens_the_menu_and_closes_it_again() {
   TEST_ASSERT_TRUE(app.wantsFullRefresh());
   app.draw(f.display);
   TEST_ASSERT_TRUE(f.display.shows("Menu"));
-  TEST_ASSERT_TRUE(f.display.shows("Increase font size"));
-  TEST_ASSERT_TRUE(f.display.shows("Decrease font size"));
-  TEST_ASSERT_TRUE(f.display.shows("Back to library"));
   TEST_ASSERT_TRUE(f.display.shows("Font size: Small"));
+  TEST_ASSERT_TRUE(f.display.shows("Line height: 100%"));
+  TEST_ASSERT_TRUE(f.display.shows("Back to library"));
 
   TEST_ASSERT_TRUE(app.onInput(InputEvent::Back));
   ASSERT_VIEW(Reading, app);
@@ -1088,7 +1100,7 @@ void test_hold_b_opens_the_menu_and_closes_it_again() {
 
 void test_menu_selection_wraps_and_does_not_turn_pages() {
   Fixture f;
-  EReaderApp app(f.fs, f.display);
+  EReaderApp app(f.fs, f.display, f.battery);
   app.onOpen();
   app.onInput(InputEvent::Select);
   finishIndexing(app);
@@ -1098,15 +1110,132 @@ void test_menu_selection_wraps_and_does_not_turn_pages() {
   TEST_ASSERT_TRUE(app.onInput(InputEvent::Previous));
   TEST_ASSERT_TRUE(app.selectedMenuItem() == Item::BackToLibrary);
   TEST_ASSERT_TRUE(app.onInput(InputEvent::Next));
-  TEST_ASSERT_TRUE(app.selectedMenuItem() == Item::IncreaseFont);
+  TEST_ASSERT_TRUE(app.selectedMenuItem() == Item::FontSize);
   TEST_ASSERT_TRUE(app.onInput(InputEvent::Next));
-  TEST_ASSERT_TRUE(app.selectedMenuItem() == Item::DecreaseFont);
+  TEST_ASSERT_TRUE(app.selectedMenuItem() == Item::LineHeight);
   TEST_ASSERT_EQUAL(0, app.currentPage());
+}
+
+void test_preview_shows_the_current_page_and_tracks_changes() {
+  Fixture f;
+  EReaderApp app(f.fs, f.display, f.battery);
+  app.onOpen();
+  app.onInput(InputEvent::Select);
+  finishIndexing(app);
+
+  app.onInput(InputEvent::Back);
+  TEST_ASSERT_TRUE(app.onInput(InputEvent::Select));
+  ASSERT_VIEW(Preview, app);
+  app.draw(f.display);
+  TEST_ASSERT_TRUE(f.display.shows("Font size: Small"));
+  TEST_ASSERT_TRUE(f.display.shows("Chapter"));
+  TEST_ASSERT_TRUE(f.display.showsPart("alpha alpha"));
+  const std::string small = app.previewText();
+
+  TEST_ASSERT_TRUE(app.onInput(InputEvent::Previous));  // A increases
+  TEST_ASSERT_EQUAL(1, app.previewFontLevel());
+  TEST_ASSERT_TRUE(app.previewText().size() < small.size());
+  f.display.beginFrame(Color::White);
+  app.draw(f.display);
+  TEST_ASSERT_TRUE(f.display.shows("Font size: Medium"));
+
+  TEST_ASSERT_TRUE(app.onInput(InputEvent::Next));  // B decreases
+  TEST_ASSERT_EQUAL(0, app.previewFontLevel());
+  TEST_ASSERT_EQUAL_STRING(small.c_str(), app.previewText().c_str());
+}
+
+void test_preview_changes_nothing_until_confirmed() {
+  Fixture f;
+  EReaderApp app(f.fs, f.display, f.battery);
+  app.onOpen();
+  app.onInput(InputEvent::Select);
+  finishIndexing(app);
+  app.onInput(InputEvent::Next);
+  const uint32_t total = app.pageCount();
+  f.fs.opens.clear();
+
+  app.onInput(InputEvent::Back);
+  app.onInput(InputEvent::Select);
+  app.onInput(InputEvent::Previous);
+  app.onInput(InputEvent::Previous);
+  TEST_ASSERT_EQUAL(2, app.previewFontLevel());
+  TEST_ASSERT_EQUAL(0, app.fontLevel());
+  TEST_ASSERT_EQUAL(0, f.fs.opens[kSettingsPath]);
+  TEST_ASSERT_EQUAL(1, f.fs.countFiles(".idx"));
+
+  TEST_ASSERT_TRUE(app.onInput(InputEvent::Back));  // quits without saving
+  ASSERT_VIEW(Menu, app);
+  TEST_ASSERT_TRUE(app.wantsFullRefresh());
+  TEST_ASSERT_TRUE(app.selectedMenuItem() == EReaderApp::MenuItem::FontSize);
+  TEST_ASSERT_EQUAL(0, app.fontLevel());
+  TEST_ASSERT_EQUAL(0, f.fs.files.count(kSettingsPath));
+  TEST_ASSERT_EQUAL(0, f.fs.opens[kBookPath]);
+
+  app.onInput(InputEvent::Back);
+  ASSERT_VIEW(Reading, app);
+  TEST_ASSERT_EQUAL(1, app.currentPage());
+  TEST_ASSERT_EQUAL(total, app.pageCount());
+}
+
+void test_preview_stops_at_both_ends() {
+  Fixture f;
+  EReaderApp app(f.fs, f.display, f.battery);
+  app.onOpen();
+  app.onInput(InputEvent::Select);
+  finishIndexing(app);
+
+  app.onInput(InputEvent::Back);
+  app.onInput(InputEvent::Select);
+  TEST_ASSERT_FALSE(app.onInput(InputEvent::Next));  // already the smallest
+  for (int i = 0; i < 2; ++i) TEST_ASSERT_TRUE(app.onInput(InputEvent::Previous));
+  TEST_ASSERT_FALSE(app.onInput(InputEvent::Previous));  // already the largest
+  TEST_ASSERT_EQUAL(2, app.previewFontLevel());
+  app.onInput(InputEvent::Back);
+
+  app.onInput(InputEvent::Next);
+  app.onInput(InputEvent::Select);
+  TEST_ASSERT_FALSE(app.onInput(InputEvent::Next));
+  for (int i = 0; i < 3; ++i) TEST_ASSERT_TRUE(app.onInput(InputEvent::Previous));
+  TEST_ASSERT_FALSE(app.onInput(InputEvent::Previous));
+  TEST_ASSERT_EQUAL(3, app.previewLineLevel());
+}
+
+void test_preview_at_a_smaller_size_reads_on_to_fill_the_page() {
+  Fixture f;
+  EReaderApp app(f.fs, f.display, f.battery);
+  app.onOpen();
+  app.onInput(InputEvent::Select);
+  finishIndexing(app);
+  changeSetting(app, EReaderApp::MenuItem::FontSize, 2);
+
+  app.onInput(InputEvent::Next);
+  app.onInput(InputEvent::Back);
+  app.onInput(InputEvent::Select);
+  app.onInput(InputEvent::Next);
+  app.onInput(InputEvent::Next);
+  TEST_ASSERT_EQUAL(0, app.previewFontLevel());
+  const size_t lines = size_t(std::count(app.previewText().begin(), app.previewText().end(), '\n'));
+  TEST_ASSERT_GREATER_THAN(15, int(lines));
+}
+
+void test_preview_works_on_the_last_page() {
+  Fixture f;
+  EReaderApp app(f.fs, f.display, f.battery);
+  app.onOpen();
+  app.onInput(InputEvent::Select);
+  finishIndexing(app);
+  while (app.pagesLeft() > 0) app.onInput(InputEvent::Next);
+
+  app.onInput(InputEvent::Back);
+  app.onInput(InputEvent::Select);
+  TEST_ASSERT_FALSE(app.previewText().empty());
+  app.draw(f.display);
+  TEST_ASSERT_TRUE(f.display.showsPart("Cafe"));
 }
 
 void test_increasing_font_keeps_the_place_in_the_text() {
   Fixture f;
-  EReaderApp app(f.fs, f.display);
+  EReaderApp app(f.fs, f.display, f.battery);
   app.onOpen();
   app.onInput(InputEvent::Select);
   finishIndexing(app);
@@ -1118,7 +1247,9 @@ void test_increasing_font_keeps_the_place_in_the_text() {
   const int before = int(app.currentPage() * 1000 / smallPages);
 
   app.onInput(InputEvent::Back);
-  app.onInput(InputEvent::Select);  // Increase font size is the first item
+  app.onInput(InputEvent::Select);
+  app.onInput(InputEvent::Previous);
+  app.onInput(InputEvent::Select);  // sets it
   ASSERT_VIEW(Indexing, app);
   finishIndexing(app);
   ASSERT_VIEW(Reading, app);
@@ -1129,85 +1260,100 @@ void test_increasing_font_keeps_the_place_in_the_text() {
   TEST_ASSERT_INT_WITHIN(50, before, int(app.currentPage() * 1000 / app.pageCount()));
 }
 
-void test_font_size_is_remembered_for_other_books_and_restarts() {
+void test_line_height_spreads_text_and_keeps_the_place() {
+  Fixture f;
+  EReaderApp app(f.fs, f.display, f.battery);
+  app.onOpen();
+  app.onInput(InputEvent::Select);
+  finishIndexing(app);
+  while (firstWordOnPage(app, f.display) != "bravo") app.onInput(InputEvent::Next);
+  const uint32_t pagesBefore = app.pageCount();
+
+  changeSetting(app, EReaderApp::MenuItem::LineHeight, 3);
+  ASSERT_VIEW(Reading, app);
+  TEST_ASSERT_EQUAL(3, app.lineLevel());
+  TEST_ASSERT_EQUAL(0, app.fontLevel());
+  TEST_ASSERT_GREATER_THAN(int(pagesBefore), int(app.pageCount()));
+  TEST_ASSERT_EQUAL_STRING("bravo", firstWordOnPage(app, f.display).c_str());
+
+  app.onInput(InputEvent::Back);
+  app.draw(f.display);
+  TEST_ASSERT_TRUE(f.display.shows("Line height: 150%"));
+}
+
+void test_style_is_remembered_for_other_books_and_restarts() {
   Fixture f;
   f.fs.files["/books/other.epub"] = makeEpub(10);
   {
-    EReaderApp app(f.fs, f.display);
+    EReaderApp app(f.fs, f.display, f.battery);
     app.onOpen();
     app.onInput(InputEvent::Select);
     finishIndexing(app);
-    chooseFromMenu(app, EReaderApp::MenuItem::IncreaseFont);
-    TEST_ASSERT_EQUAL(1, app.fontLevel());
+    changeSetting(app, EReaderApp::MenuItem::FontSize, 1);
+    changeSetting(app, EReaderApp::MenuItem::LineHeight, 2);
   }
 
-  EReaderApp app(f.fs, f.display);
-  TEST_ASSERT_EQUAL(0, app.fontLevel());  // nothing is read until the app opens
+  EReaderApp app(f.fs, f.display, f.battery);
   app.onOpen();
   TEST_ASSERT_EQUAL(1, app.fontLevel());
+  TEST_ASSERT_EQUAL(2, app.lineLevel());
 
-  // The second book is indexed at the remembered size.
+  // The second book is indexed with the remembered style.
   const size_t indexes = f.fs.countFiles(".idx");
   app.onInput(InputEvent::Next);
   app.onInput(InputEvent::Select);
   finishIndexing(app);
   ASSERT_VIEW(Reading, app);
   TEST_ASSERT_EQUAL(indexes + 1, f.fs.countFiles(".idx"));
-  chooseFromMenu(app, EReaderApp::MenuItem::BackToLibrary);
-  TEST_ASSERT_EQUAL(1, app.fontLevel());
 }
 
-void test_returning_to_a_font_size_needs_no_indexing() {
+void test_returning_to_a_style_needs_no_indexing() {
   Fixture f;
-  EReaderApp app(f.fs, f.display);
+  EReaderApp app(f.fs, f.display, f.battery);
   app.onOpen();
   app.onInput(InputEvent::Select);
   finishIndexing(app);
   for (int i = 0; i < 5; ++i) app.onInput(InputEvent::Next);
-  chooseFromMenu(app, EReaderApp::MenuItem::IncreaseFont);
+  changeSetting(app, EReaderApp::MenuItem::FontSize, 1);
 
   f.fs.opens.clear();
   app.onInput(InputEvent::Back);
+  app.onInput(InputEvent::Select);
   app.onInput(InputEvent::Next);
-  app.onInput(InputEvent::Select);  // Decrease font size
+  app.onInput(InputEvent::Select);
   ASSERT_VIEW(Reading, app);
   TEST_ASSERT_EQUAL(0, app.fontLevel());
   TEST_ASSERT_EQUAL(0, f.fs.opens[kBookPath]);
   TEST_ASSERT_EQUAL(5, app.currentPage());  // same layout, so the exact page
 }
 
-void test_font_size_stops_at_both_ends() {
+void test_confirming_without_a_change_just_returns_to_the_book() {
   Fixture f;
-  EReaderApp app(f.fs, f.display);
+  EReaderApp app(f.fs, f.display, f.battery);
   app.onOpen();
   app.onInput(InputEvent::Select);
   finishIndexing(app);
-
-  app.onInput(InputEvent::Back);
   app.onInput(InputEvent::Next);
-  TEST_ASSERT_FALSE(app.onInput(InputEvent::Select));  // already the smallest
-  ASSERT_VIEW(Menu, app);
-  app.onInput(InputEvent::Back);
 
-  chooseFromMenu(app, EReaderApp::MenuItem::IncreaseFont);
-  chooseFromMenu(app, EReaderApp::MenuItem::IncreaseFont);
-  TEST_ASSERT_EQUAL(2, app.fontLevel());
   app.onInput(InputEvent::Back);
-  app.draw(f.display);
-  TEST_ASSERT_TRUE(f.display.shows("Font size: Large"));
-  TEST_ASSERT_FALSE(app.onInput(InputEvent::Select));  // already the largest
-  ASSERT_VIEW(Menu, app);
+  app.onInput(InputEvent::Select);
+  TEST_ASSERT_TRUE(app.onInput(InputEvent::Select));
+  ASSERT_VIEW(Reading, app);
+  TEST_ASSERT_EQUAL(1, app.currentPage());
+  TEST_ASSERT_EQUAL(0, f.fs.files.count(kSettingsPath));
 }
 
-void test_cancelling_font_change_indexing_keeps_book_usable() {
+void test_cancelling_style_change_indexing_keeps_book_usable() {
   Fixture f;
-  EReaderApp app(f.fs, f.display);
+  EReaderApp app(f.fs, f.display, f.battery);
   app.onOpen();
   app.onInput(InputEvent::Select);
   finishIndexing(app);
   app.onInput(InputEvent::Next);
 
   app.onInput(InputEvent::Back);
+  app.onInput(InputEvent::Select);
+  app.onInput(InputEvent::Previous);
   app.onInput(InputEvent::Select);
   ASSERT_VIEW(Indexing, app);
   TEST_ASSERT_TRUE(app.onInput(InputEvent::Back));
@@ -1219,21 +1365,126 @@ void test_cancelling_font_change_indexing_keeps_book_usable() {
   ASSERT_VIEW(Reading, app);
 }
 
-void test_unusable_font_setting_falls_back_to_the_default() {
+void test_unusable_settings_fall_back_to_the_defaults() {
   Fixture f;
-  saveFontLevel(f.fs, 99);
-  EReaderApp app(f.fs, f.display);
+  ReaderSettings settings;
+  settings.fontLevel = 99;
+  settings.lineLevel = 99;
+  saveSettings(f.fs, settings);
+  EReaderApp app(f.fs, f.display, f.battery);
   app.onOpen();
   TEST_ASSERT_EQUAL(0, app.fontLevel());
+  TEST_ASSERT_EQUAL(0, app.lineLevel());
 
   f.fs.files[kSettingsPath] = "x";
   app.onOpen();
   TEST_ASSERT_EQUAL(0, app.fontLevel());
 }
 
+// These pin the files that must survive firmware updates. If one fails, don't
+// update the expected bytes: read the old format as well as the new one.
+void test_progress_file_format_is_frozen() {
+  MemoryFileSystem fs;
+  fs.dirs["/books"] = true;
+  TEST_ASSERT_TRUE(savePosition(fs, "/books/.cache/abc", 0x01020304));
+  const std::string expected("PBP2\x04\x03\x02\x01", 8);
+  TEST_ASSERT_TRUE(fs.files["/books/.cache/abc.pos"] == expected);
+  TEST_ASSERT_EQUAL(0x01020304, loadPosition(fs, "/books/.cache/abc"));
+}
+
+void test_book_identity_is_frozen() {
+  TEST_ASSERT_EQUAL_STRING("/books/.cache/3b249543", cacheStem("book.epub", 123456).c_str());
+}
+
+void test_settings_from_older_firmware_still_load() {
+  MemoryFileSystem fs;
+  fs.files[kSettingsPath] = std::string("PBS1\x02\x00\x00\x00", 8);  // before line height
+  const ReaderSettings older = loadSettings(fs);
+  TEST_ASSERT_EQUAL(2, older.fontLevel);
+  TEST_ASSERT_EQUAL(0, older.lineLevel);
+
+  ReaderSettings settings;
+  settings.fontLevel = 1;
+  settings.lineLevel = 3;
+  saveSettings(fs, settings);
+  const std::string expected("PBS1\x01\x00\x00\x00\x03\x00\x00\x00", 12);
+  TEST_ASSERT_TRUE(fs.files[kSettingsPath] == expected);
+}
+
+void test_progress_survives_losing_every_index() {
+  Fixture f;
+  uint32_t page = 0;
+  {
+    EReaderApp app(f.fs, f.display, f.battery);
+    app.onOpen();
+    app.onInput(InputEvent::Select);
+    finishIndexing(app);
+    for (int i = 0; i < 6; ++i) app.onInput(InputEvent::Next);
+    page = app.currentPage();
+  }
+
+  // What a firmware with a new index format does: none of them can be used.
+  for (auto it = f.fs.files.begin(); it != f.fs.files.end();) {
+    const std::string& name = it->first;
+    const bool index = name.size() > 4 && name.compare(name.size() - 4, 4, ".idx") == 0;
+    it = index ? f.fs.files.erase(it) : std::next(it);
+  }
+
+  EReaderApp app(f.fs, f.display, f.battery);
+  app.onOpen();
+  app.onInput(InputEvent::Select);
+  ASSERT_VIEW(Indexing, app);
+  finishIndexing(app);
+  TEST_ASSERT_EQUAL(page, app.currentPage());
+}
+
+void test_battery_level_shows_while_reading_and_in_menus() {
+  Fixture f;
+  EReaderApp app(f.fs, f.display, f.battery);
+  app.onOpen();
+  app.draw(f.display);
+  TEST_ASSERT_TRUE(f.display.shows("87%"));
+
+  app.onInput(InputEvent::Select);
+  finishIndexing(app);
+  f.display.beginFrame(Color::White);
+  app.draw(f.display);
+  TEST_ASSERT_TRUE(f.display.shows("87%"));
+
+  app.onInput(InputEvent::Back);
+  f.display.beginFrame(Color::White);
+  app.draw(f.display);
+  TEST_ASSERT_TRUE(f.display.shows("87%"));
+}
+
+void test_battery_level_is_hidden_when_unreadable() {
+  Fixture f;
+  f.battery.charge = -1;
+  EReaderApp app(f.fs, f.display, f.battery);
+  app.onOpen();
+  app.onInput(InputEvent::Select);
+  finishIndexing(app);
+  f.display.beginFrame(Color::White);
+  app.draw(f.display);
+  TEST_ASSERT_FALSE(f.display.showsPart("%"));
+}
+
+void test_laid_out_page_can_be_laid_out_again() {
+  const PageMetrics metrics = smallPage(200, 40);
+  const auto pages = layoutText(metrics, "<h1>Title</h1><p>one two three four five six</p><p>end</p>");
+  TEST_ASSERT_EQUAL(1, pages.size());
+
+  std::vector<std::string> again;
+  PageLayout layout(metrics, [&](const std::string& page) { again.push_back(page); });
+  feedLaidOutPage(pages[0], layout);
+  layout.chapterBreak();
+  TEST_ASSERT_EQUAL(1, again.size());
+  TEST_ASSERT_EQUAL_STRING(pages[0].c_str(), again[0].c_str());
+}
+
 void test_position_round_trips_within_a_layout() {
   Fixture f;
-  EReaderApp app(f.fs, f.display);
+  EReaderApp app(f.fs, f.display, f.battery);
   app.onOpen();
   app.onInput(InputEvent::Select);
   finishIndexing(app);
@@ -1255,7 +1506,7 @@ void test_position_round_trips_within_a_layout() {
 
 void test_positions_are_the_same_text_at_every_font_size() {
   Fixture f;
-  EReaderApp app(f.fs, f.display);
+  EReaderApp app(f.fs, f.display, f.battery);
   app.onOpen();
   app.onInput(InputEvent::Select);
   finishIndexing(app);
@@ -1263,7 +1514,7 @@ void test_positions_are_the_same_text_at_every_font_size() {
 
   BookPages small;
   TEST_ASSERT_TRUE(small.open(f.fs, stem, app.layoutFingerprint()));
-  chooseFromMenu(app, EReaderApp::MenuItem::IncreaseFont);
+  changeSetting(app, EReaderApp::MenuItem::FontSize, 1);
   BookPages medium;
   TEST_ASSERT_TRUE(medium.open(f.fs, stem, app.layoutFingerprint()));
   TEST_ASSERT_GREATER_THAN(int(small.pageCount()), int(medium.pageCount()));
@@ -1287,7 +1538,7 @@ void test_long_title_is_shortened_to_fit() {
   f.fs.files.clear();
   const std::string name(200, 'a');
   f.fs.files["/books/" + name + ".epub"] = "x";
-  EReaderApp app(f.fs, f.display);
+  EReaderApp app(f.fs, f.display, f.battery);
   app.onOpen();
   app.draw(f.display);
   TEST_ASSERT_TRUE(f.display.showsPart("..."));
@@ -1346,12 +1597,25 @@ int main(int, char**) {
   RUN_TEST(test_long_title_is_shortened_to_fit);
   RUN_TEST(test_hold_b_opens_the_menu_and_closes_it_again);
   RUN_TEST(test_menu_selection_wraps_and_does_not_turn_pages);
+  RUN_TEST(test_preview_shows_the_current_page_and_tracks_changes);
+  RUN_TEST(test_preview_changes_nothing_until_confirmed);
+  RUN_TEST(test_preview_stops_at_both_ends);
+  RUN_TEST(test_preview_at_a_smaller_size_reads_on_to_fill_the_page);
+  RUN_TEST(test_preview_works_on_the_last_page);
   RUN_TEST(test_increasing_font_keeps_the_place_in_the_text);
-  RUN_TEST(test_font_size_is_remembered_for_other_books_and_restarts);
-  RUN_TEST(test_returning_to_a_font_size_needs_no_indexing);
-  RUN_TEST(test_font_size_stops_at_both_ends);
-  RUN_TEST(test_cancelling_font_change_indexing_keeps_book_usable);
-  RUN_TEST(test_unusable_font_setting_falls_back_to_the_default);
+  RUN_TEST(test_line_height_spreads_text_and_keeps_the_place);
+  RUN_TEST(test_style_is_remembered_for_other_books_and_restarts);
+  RUN_TEST(test_returning_to_a_style_needs_no_indexing);
+  RUN_TEST(test_confirming_without_a_change_just_returns_to_the_book);
+  RUN_TEST(test_cancelling_style_change_indexing_keeps_book_usable);
+  RUN_TEST(test_unusable_settings_fall_back_to_the_defaults);
+  RUN_TEST(test_progress_file_format_is_frozen);
+  RUN_TEST(test_book_identity_is_frozen);
+  RUN_TEST(test_settings_from_older_firmware_still_load);
+  RUN_TEST(test_progress_survives_losing_every_index);
+  RUN_TEST(test_battery_level_shows_while_reading_and_in_menus);
+  RUN_TEST(test_battery_level_is_hidden_when_unreadable);
+  RUN_TEST(test_laid_out_page_can_be_laid_out_again);
   RUN_TEST(test_position_round_trips_within_a_layout);
   RUN_TEST(test_positions_are_the_same_text_at_every_font_size);
   return UNITY_END();

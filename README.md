@@ -27,15 +27,26 @@ Copy `.epub` files into a `books` folder on the SD card, then open **E-Reader** 
 | Hold **A**   | Open selected book   | –                    | Choose selected item |
 | Hold **B**   | Back to home screen  | Open the book menu   | Back to the book     |
 
+The home screen, library, book menu and the bottom of each page show the battery level. It's estimated from the battery voltage, so treat it as approximate; it reads high while charging. It updates when the screen redraws.
+
 The first time you open a book, paperOS indexes it: it extracts the text and lays it out into pages for this screen. A progress bar shows how far along it is, and holding B cancels. The result is cached on the SD card, so the book opens straight away after that.
 
-Your place is saved on every page turn, so you can switch off at any time. The bottom of each page shows your position and the pages remaining, for example `Page 41 of 635` and `594 pages left`.
+Your place is saved on every page turn, so you can switch off at any time, and it's kept on the SD card, so it survives firmware updates. The bottom of each page shows your position and the pages remaining, for example `Page 41 of 635` and `594 pages left`.
 
-The book menu has **Increase font size**, **Decrease font size** and **Back to library**. There are three sizes: Small, Medium and Large. Your choice applies to every book and is remembered across restarts. Changing size keeps you at the same place in the text, though the page numbers change. A book is indexed once for each size you read it at, so going back to a size you've already used is instant. In the library, books not yet indexed at the current size show "Not indexed yet", and keep your place when you open them.
+The book menu has **Font size**, **Line height** and **Back to library**. Choosing font size or line height opens a preview of your current page:
+
+| Input        | Preview                         |
+|--------------|---------------------------------|
+| Press **A**  | Increase                        |
+| Press **B**  | Decrease                        |
+| Hold **A**   | Keep this setting               |
+| Hold **B**   | Cancel, changing nothing        |
+
+There are three font sizes (Small, Medium, Large) and four line heights (100% to 150%). Your choice applies to every book and is remembered across restarts. Changing either keeps you at the same place in the text, though the page numbers change. A book is indexed once for each combination you read it at, so going back to one you've already used is instant. In the library, books not yet indexed at the current settings show "Not indexed yet", and keep your place when you open them.
 
 Good to know:
 
-- The cache lives in `/books/.cache`, along with your saved places and font size. It's safe to delete, but books will need indexing again and restart from page 1, and the font size goes back to Small.
+- The cache lives in `/books/.cache`, along with your saved places, font size and line height. It's safe to delete, but books will need indexing again and restart from page 1, and the text settings go back to their defaults.
 - Replacing a book with a different file starts it again from page 1.
 - Text only. Images are skipped, so books made of scanned pages show "This book has no readable text".
 - The display fonts are ASCII-only, so curly quotes and dashes become plain ones and accents are dropped (`café` shows as `cafe`). Scripts with no ASCII equivalent, such as Cyrillic, Greek or CJK, show as `?`.
@@ -64,11 +75,13 @@ The parser supports a subset of TOML: `[section]` headers, `key = "string"`, `ke
 platformio.ini            build configuration (PaperDIY firmware + native test env)
 src/                      firmware entry point and M5Stack hardware glue
   main.cpp                boots the device, reads buttons, registers apps
+  M5Battery.h             paperos::Battery implemented with M5Unified
   M5Display.{h,cpp}       paperos::Display implemented with M5GFX
   SdConfig.{h,cpp}        mounts the SD card and loads /config.toml
   SdFileSystem.{h,cpp}    paperos::FileSystem implemented with the SD library
 lib/paperos-core/         hardware-independent OS core
   src/paperos/App.h       base class every app implements
+  src/paperos/Battery.*   battery level interface and indicator
   src/paperos/Config.*    config.toml parser and lookup
   src/paperos/Display.h   drawing interface apps render to
   src/paperos/FileSystem.h  storage interface used by apps

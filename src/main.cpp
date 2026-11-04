@@ -7,6 +7,7 @@
 #include <M5Unified.h>
 #include <paperos.h>
 
+#include "M5Battery.h"
 #include "M5Display.h"
 #include "SdConfig.h"
 #include "SdFileSystem.h"
@@ -25,6 +26,7 @@ constexpr uint32_t kLoopDelayMs = 10;
 M5Display* display = nullptr;
 paperos::Config config;  // loaded from /config.toml on the SD card in setup()
 SdFileSystem sdFileSystem;
+M5Battery battery;
 paperos::Shell shell;
 paperos::GestureDetector buttonA;
 paperos::GestureDetector buttonB;
@@ -49,8 +51,9 @@ void setup() {
 
   loadConfigFromSd(config);
 
-  static EReaderApp eReaderApp(sdFileSystem, m5Display);
+  static EReaderApp eReaderApp(sdFileSystem, m5Display, battery);
 
+  shell.setBattery(&battery);
   shell.addApp(&helloWorldApp);
   shell.addApp(&eReaderApp);
 

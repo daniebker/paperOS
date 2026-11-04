@@ -71,6 +71,10 @@ void Shell::drawHome(Display& display) {
   // Header.
   const int titleH = display.textHeight(TextSize::Title);
   display.drawText("paperOS", margin, margin, TextSize::Title);
+  if (battery_ != nullptr) {
+    const int batteryY = margin + (titleH - display.textHeight(TextSize::Small)) / 2;
+    drawBatteryLevel(display, *battery_, w - margin, batteryY, TextAlign::Right);
+  }
   const int headerBottom = margin * 2 + titleH;
   display.fillRect(0, headerBottom - 4, w, 4, Color::Black);
 

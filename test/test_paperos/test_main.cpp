@@ -54,6 +54,12 @@ class CountingApp : public App {
   int closed = 0;
 };
 
+class FakeBattery : public Battery {
+ public:
+  int level() const override { return charge; }
+  int charge = 87;
+};
+
 class WorkingApp : public App {
  public:
   const char* name() const override { return "Working"; }
@@ -329,6 +335,21 @@ void test_app_can_request_a_quality_refresh() {
   ASSERT_ENUM(Refresh::Quality, display.lastRefresh);
 }
 
+void test_home_screen_shows_the_battery_level() {
+  Shell shell;
+  FakeBattery battery;
+  FakeDisplay display;
+  shell.setBattery(&battery);
+  shell.draw(display);
+  TEST_ASSERT_TRUE(display.shows("87%"));
+
+  battery.charge = -1;  // can't be read
+  shell.draw(display);
+  for (const std::string& text : display.texts) {
+    TEST_ASSERT_EQUAL(std::string::npos, text.find('%'));
+  }
+}
+
 int main(int, char**) {
   UNITY_BEGIN();
   RUN_TEST(test_short_press_fires_on_release);
@@ -347,6 +368,7 @@ int main(int, char**) {
   RUN_TEST(test_hello_world_app_flow);
   RUN_TEST(test_hello_world_app_without_owner_name);
   RUN_TEST(test_shell_ticks_only_the_open_app);
+  RUN_TEST(test_home_screen_shows_the_battery_level);
   RUN_TEST(test_app_can_request_a_quality_refresh);
   return UNITY_END();
 }

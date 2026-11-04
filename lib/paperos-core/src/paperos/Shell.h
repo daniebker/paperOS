@@ -3,6 +3,7 @@
 #include <cstddef>
 
 #include "paperos/App.h"
+#include "paperos/Battery.h"
 
 namespace paperos {
 
@@ -14,6 +15,9 @@ class Shell {
 
   // Returns false if the app table is full.
   bool addApp(App* app);
+
+  // Shows the charge on the home screen. Must outlive the shell.
+  void setBattery(const Battery* battery) { battery_ = battery; }
 
   // Feeds one input event. Returns true if the screen needs redrawing.
   bool handle(InputEvent event);
@@ -45,6 +49,7 @@ class Shell {
   size_t appCount_ = 0;
   size_t selected_ = 0;
   App* active_ = nullptr;
+  const Battery* battery_ = nullptr;
   bool fullRefreshPending_ = true;
 };
 

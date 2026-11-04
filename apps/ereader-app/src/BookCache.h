@@ -26,6 +26,11 @@ constexpr const char* kSettingsPath = "/books/.cache/settings.bin";
 // the EPUB. The index is written under a temporary name and renamed once it
 // is complete, so a power cut can't leave a partial one behind.
 // kSettingsPath is shared by all books.
+//
+// Reading progress must survive firmware updates, which leave the SD card
+// alone. So .pos files, the settings file and cacheStem() are frozen: a new
+// firmware has to keep reading what older ones wrote, and test_ereader pins
+// their exact bytes. Indexes can change freely, as they can be rebuilt.
 
 // Stored at the very end of an .idx file.
 struct IndexFooter {
@@ -59,9 +64,15 @@ bool readIndexFooter(paperos::FileSystem& fs, const std::string& stem, uint32_t 
 uint32_t loadPosition(paperos::FileSystem& fs, const std::string& stem);
 bool savePosition(paperos::FileSystem& fs, const std::string& stem, uint32_t position);
 
-// Reader-wide font size choice, 0 if never saved.
-uint32_t loadFontLevel(paperos::FileSystem& fs);
-bool saveFontLevel(paperos::FileSystem& fs, uint32_t level);
+// Text style chosen for every book, as indexes into the app's lists of choices.
+struct ReaderSettings {
+  uint32_t fontLevel = 0;
+  uint32_t lineLevel = 0;
+};
+
+// The defaults if nothing has been saved.
+ReaderSettings loadSettings(paperos::FileSystem& fs);
+bool saveSettings(paperos::FileSystem& fs, const ReaderSettings& settings);
 
 // Pages left after `page` (zero-based), so 0 on the last page.
 uint32_t pagesRemaining(uint32_t page, uint32_t pageCount);

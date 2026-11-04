@@ -2,6 +2,7 @@
 
 // Umbrella header for paperOS apps.
 #include "paperos/App.h"
+#include "paperos/Battery.h"
 #include "paperos/Config.h"
 #include "paperos/Display.h"
 #include "paperos/FileSystem.h"

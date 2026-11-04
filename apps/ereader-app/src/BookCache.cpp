@@ -82,17 +82,23 @@ bool savePosition(paperos::FileSystem& fs, const std::string& stem, uint32_t pos
   return file && file->write(record, sizeof(record)) == sizeof(record);
 }
 
-uint32_t loadFontLevel(paperos::FileSystem& fs) {
+ReaderSettings loadSettings(paperos::FileSystem& fs) {
+  // New fields go at the end: older files simply stop early, leaving them 0.
+  ReaderSettings settings;
   std::unique_ptr<paperos::File> file = fs.open(kSettingsPath, paperos::FileMode::Read);
-  uint32_t record[2] = {0, 0};
-  if (!file || file->read(record, sizeof(record)) != sizeof(record)) return 0;
-  return record[0] == kSettingsMagic ? record[1] : 0;
+  uint32_t record[3] = {0, 0, 0};
+  if (!file) return settings;
+  const size_t size = file->read(record, sizeof(record));
+  if (size < 2 * sizeof(uint32_t) || record[0] != kSettingsMagic) return settings;
+  settings.fontLevel = record[1];
+  settings.lineLevel = record[2];
+  return settings;
 }
 
-bool saveFontLevel(paperos::FileSystem& fs, uint32_t level) {
+bool saveSettings(paperos::FileSystem& fs, const ReaderSettings& settings) {
   fs.makeDir(kCacheDir);  // fails harmlessly if it exists
   std::unique_ptr<paperos::File> file = fs.open(kSettingsPath, paperos::FileMode::Write);
-  const uint32_t record[2] = {kSettingsMagic, level};
+  const uint32_t record[3] = {kSettingsMagic, settings.fontLevel, settings.lineLevel};
   return file && file->write(record, sizeof(record)) == sizeof(record);
 }
 

@@ -73,4 +73,8 @@ class PageLayout : public TextSink {
   uint32_t pageCount_ = 0;
 };
 
+// Feeds a page in the format above back into `sink`, without its line wrapping,
+// so it can be laid out again with other metrics.
+void feedLaidOutPage(const std::string& page, TextSink& sink);
+
 }  // namespace ereader

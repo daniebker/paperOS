@@ -113,4 +113,27 @@ void PageLayout::finishPage() {
   usedHeight_ = 0;
 }
 
+void feedLaidOutPage(const std::string& page, TextSink& sink) {
+  bool heading = false;
+  size_t start = 0;
+  while (start < page.size()) {
+    size_t end = page.find('\n', start);
+    if (end == std::string::npos) end = page.size();
+
+    if (end == start) {
+      sink.onParagraphEnd();
+    } else {
+      const bool headingLine = page[start] == kHeadingMarker;
+      if (headingLine != heading) {
+        heading = headingLine;
+        sink.onHeading(heading);
+      }
+      for (size_t i = start + (headingLine ? 1 : 0); i < end; ++i) sink.onChar(page[i]);
+      sink.onChar(' ');
+    }
+    start = end + 1;
+  }
+  if (heading) sink.onHeading(false);
+}
+
 }  // namespace ereader

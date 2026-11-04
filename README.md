@@ -20,20 +20,22 @@ A hold counts as a long press once it reaches 600 ms. It fires while the button 
 
 Copy `.epub` files into a `books` folder on the SD card, then open **E-Reader** from the home screen. Books are listed by title with the pages you have left.
 
-| Input        | Library              | Reading a book       |
-|--------------|----------------------|----------------------|
-| Press **A**  | Move selection up    | Previous page        |
-| Press **B**  | Move selection down  | Next page            |
-| Hold **A**   | Open selected book   | –                    |
-| Hold **B**   | Back to home screen  | Back to the library  |
+| Input        | Library              | Reading a book       | Book menu            |
+|--------------|----------------------|----------------------|----------------------|
+| Press **A**  | Move selection up    | Previous page        | Move selection up    |
+| Press **B**  | Move selection down  | Next page            | Move selection down  |
+| Hold **A**   | Open selected book   | –                    | Choose selected item |
+| Hold **B**   | Back to home screen  | Open the book menu   | Back to the book     |
 
 The first time you open a book, paperOS indexes it: it extracts the text and lays it out into pages for this screen. A progress bar shows how far along it is, and holding B cancels. The result is cached on the SD card, so the book opens straight away after that.
 
 Your place is saved on every page turn, so you can switch off at any time. The bottom of each page shows your position and the pages remaining, for example `Page 41 of 635` and `594 pages left`.
 
+The book menu has **Increase font size**, **Decrease font size** and **Back to library**. There are three sizes: Small, Medium and Large. Your choice applies to every book and is remembered across restarts. Changing size keeps you at the same place in the text, though the page numbers change. A book is indexed once for each size you read it at, so going back to a size you've already used is instant. In the library, books not yet indexed at the current size show "Not indexed yet", and keep your place when you open them.
+
 Good to know:
 
-- The cache lives in `/books/.cache`, along with your saved places. It's safe to delete, but books will need indexing again and will restart from page 1.
+- The cache lives in `/books/.cache`, along with your saved places and font size. It's safe to delete, but books will need indexing again and restart from page 1, and the font size goes back to Small.
 - Replacing a book with a different file starts it again from page 1.
 - Text only. Images are skipped, so books made of scanned pages show "This book has no readable text".
 - The display fonts are ASCII-only, so curly quotes and dashes become plain ones and accents are dropped (`café` shows as `cafe`). Scripts with no ASCII equivalent, such as Cyrillic, Greek or CJK, show as `?`.

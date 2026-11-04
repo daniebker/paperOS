@@ -24,6 +24,7 @@ const lgfx::IFont* fontFor(TextSize size) {
     case TextSize::Medium: return &fonts::FreeSans18pt7b;
     case TextSize::Large: return &fonts::FreeSansBold18pt7b;
     case TextSize::Title: return &fonts::FreeSansBold24pt7b;
+    case TextSize::ExtraLarge: return &fonts::FreeSans24pt7b;
   }
   return &fonts::FreeSans12pt7b;
 }

@@ -4,6 +4,7 @@
 #include <cctype>
 
 using ereader::BookIndexer;
+using ereader::BookPages;
 using ereader::IndexFooter;
 using paperos::Color;
 using paperos::DirEntry;
@@ -15,11 +16,23 @@ namespace {
 
 constexpr int kMargin = 24;
 constexpr int kFooterGap = 16;
-constexpr TextSize kBodySize = TextSize::Small;
-constexpr TextSize kHeadingSize = TextSize::Large;
 constexpr int kProgressRedrawStep = 10;  // percent; e-paper redraws are slow
 // Fast updates ghost, so clear the panel every so often.
 constexpr int kFastPageTurnsPerFullRefresh = 8;
+
+struct FontChoice {
+  const char* name;
+  TextSize body;
+  TextSize heading;
+};
+
+// In increasing size. Saved by index, so add new sizes at the end.
+const FontChoice kFontChoices[] = {
+    {"Small", TextSize::Small, TextSize::Large},
+    {"Medium", TextSize::Medium, TextSize::Large},
+    {"Large", TextSize::ExtraLarge, TextSize::Title},
+};
+constexpr size_t kFontChoiceCount = sizeof(kFontChoices) / sizeof(kFontChoices[0]);
 
 bool endsWithEpub(const std::string& name) {
   static const char kExtension[] = ".epub";
@@ -65,13 +78,20 @@ void drawFooterLegend(paperos::Display& display, const char* legend) {
 
 }  // namespace
 
-EReaderApp::EReaderApp(paperos::FileSystem& fs, const paperos::Display& display) : fs_(fs) {
-  metrics_.body.measure(display, kBodySize);
-  metrics_.heading.measure(display, kHeadingSize);
-  metrics_.width = display.width() - 2 * kMargin;
+EReaderApp::EReaderApp(paperos::FileSystem& fs, const paperos::Display& display)
+    : fs_(fs), display_(display) {
+  applyFontLevel(0);
+}
+
+void EReaderApp::applyFontLevel(size_t level) {
+  fontLevel_ = level;
+  const FontChoice& font = kFontChoices[level];
+  metrics_.body.measure(display_, font.body);
+  metrics_.heading.measure(display_, font.heading);
+  metrics_.width = display_.width() - 2 * kMargin;
   // The bottom of the screen is reserved for the page count.
   metrics_.height =
-      display.height() - 2 * kMargin - display.textHeight(TextSize::Small) - kFooterGap;
+      display_.height() - 2 * kMargin - display_.textHeight(TextSize::Small) - kFooterGap;
   metrics_.paragraphGap = metrics_.body.lineHeight / 2;
   fingerprint_ = ereader::layoutFingerprint(metrics_);
 }
@@ -79,6 +99,8 @@ EReaderApp::EReaderApp(paperos::FileSystem& fs, const paperos::Display& display)
 void EReaderApp::onOpen() {
   view_ = View::Library;
   selected_ = 0;
+  const uint32_t level = ereader::loadFontLevel(fs_);
+  applyFontLevel(level < kFontChoiceCount ? level : 0);
   scanLibrary();
 }
 
@@ -98,11 +120,11 @@ void EReaderApp::scanLibrary() {
     book.title = withoutExtension(entry.name);
     book.stem = ereader::cacheStem(entry.name, entry.size);
 
-    IndexFooter footer;
-    if (ereader::readIndexFooter(fs_, book.stem, fingerprint_, footer)) {
-      if (footer.title[0] != '\0') book.title = footer.title;
-      book.pageCount = footer.pageCount;
-      book.page = std::min(ereader::loadPosition(fs_, book.stem), book.pageCount - 1);
+    BookPages pages;
+    if (pages.open(fs_, book.stem, fingerprint_)) {
+      if (pages.title()[0] != '\0') book.title = pages.title();
+      book.pageCount = pages.pageCount();
+      book.page = pages.pageAt(ereader::loadPosition(fs_, book.stem));
     }
     books_.push_back(std::move(book));
   }
@@ -135,7 +157,7 @@ void EReaderApp::startReading() {
     showError("Could not open the book's index");
     return;
   }
-  page_ = std::min(ereader::loadPosition(fs_, book.stem), pages_.pageCount() - 1);
+  page_ = pages_.pageAt(ereader::loadPosition(fs_, book.stem));
   if (loadPage()) view_ = View::Reading;
 }
 
@@ -178,10 +200,63 @@ bool EReaderApp::turnPage(int delta) {
 
   page_ += delta;
   if (loadPage()) {
-    ereader::savePosition(fs_, books_[selected_].stem, page_);
+    ereader::savePosition(fs_, books_[selected_].stem, pages_.positionOf(page_));
     if (++fastPageTurns_ >= kFastPageTurnsPerFullRefresh) fullRefreshPending_ = true;
   }
   return true;
+}
+
+bool EReaderApp::canChangeFont(int delta) const {
+  return delta < 0 ? fontLevel_ > 0 : fontLevel_ + 1 < kFontChoiceCount;
+}
+
+bool EReaderApp::changeFont(int delta) {
+  if (!canChangeFont(delta)) return false;
+
+  // The saved position is layout independent, so reopening the book finds the
+  // same text, indexing it for the new size first if needed.
+  applyFontLevel(size_t(int(fontLevel_) + delta));
+  ereader::saveFontLevel(fs_, uint32_t(fontLevel_));
+  closeBook();
+  openSelected();
+  fullRefreshPending_ = true;
+  return true;
+}
+
+void EReaderApp::openMenu() {
+  view_ = View::Menu;
+  menuItem_ = MenuItem::IncreaseFont;
+  fullRefreshPending_ = true;
+}
+
+void EReaderApp::closeMenu() {
+  view_ = View::Reading;
+  fullRefreshPending_ = true;
+}
+
+bool EReaderApp::onMenuInput(InputEvent event) {
+  const int count = int(MenuItem::Count);
+  switch (event) {
+    case InputEvent::Previous:
+      menuItem_ = MenuItem((int(menuItem_) + count - 1) % count);
+      return true;
+    case InputEvent::Next:
+      menuItem_ = MenuItem((int(menuItem_) + 1) % count);
+      return true;
+    case InputEvent::Back:
+      closeMenu();
+      return true;
+    case InputEvent::Select:
+      switch (menuItem_) {
+        case MenuItem::IncreaseFont: return changeFont(1);
+        case MenuItem::DecreaseFont: return changeFont(-1);
+        default:
+          backToLibrary();
+          return true;
+      }
+    default:
+      return false;
+  }
 }
 
 bool EReaderApp::onInput(InputEvent event) {
@@ -205,7 +280,14 @@ bool EReaderApp::onInput(InputEvent event) {
     case View::Reading:
       if (event == InputEvent::Previous) return turnPage(-1);
       if (event == InputEvent::Next) return turnPage(1);
-      break;
+      if (event == InputEvent::Back) {
+        openMenu();
+        return true;
+      }
+      return false;
+
+    case View::Menu:
+      return onMenuInput(event);
 
     case View::Indexing:
     case View::Error:
@@ -245,6 +327,7 @@ void EReaderApp::draw(paperos::Display& display) {
     case View::Library: drawLibrary(display); break;
     case View::Indexing: drawIndexing(display); break;
     case View::Reading: drawReading(display); break;
+    case View::Menu: drawMenu(display); break;
     case View::Error: drawError(display); break;
   }
   if (fullRefreshPending_) fastPageTurns_ = 0;
@@ -318,8 +401,8 @@ void EReaderApp::drawIndexing(paperos::Display& display) {
   display.drawRect(2 * kMargin, y, barW, barH, Color::Black);
   display.fillRect(2 * kMargin, y, barW * indexer_->percent() / 100, barH, Color::Black);
   y += barH + 16;
-  display.drawText("Only needed the first time", w / 2, y, TextSize::Small, TextAlign::Center,
-                   Color::DarkGray);
+  display.drawText("Only needed once per font size", w / 2, y, TextSize::Small,
+                   TextAlign::Center, Color::DarkGray);
 
   drawFooterLegend(display, "Hold B: cancel");
 }
@@ -355,6 +438,37 @@ void EReaderApp::drawReading(paperos::Display& display) {
                    Color::DarkGray);
   display.drawText(remaining.c_str(), display.width() - kMargin, footerY, TextSize::Small,
                    TextAlign::Right, Color::DarkGray);
+}
+
+void EReaderApp::drawMenu(paperos::Display& display) {
+  const int w = display.width();
+
+  const int titleH = display.textHeight(TextSize::Title);
+  display.drawText("Menu", kMargin, kMargin, TextSize::Title);
+  const int headerBottom = kMargin * 2 + titleH;
+  display.fillRect(0, headerBottom - 4, w, 4, Color::Black);
+
+  int y = headerBottom + kMargin;
+  const std::string fontSize = std::string("Font size: ") + kFontChoices[fontLevel_].name;
+  display.drawText(fontSize.c_str(), kMargin, y, TextSize::Small, TextAlign::Left,
+                   Color::DarkGray);
+  y += display.textHeight(TextSize::Small) + kMargin;
+
+  static const char* const kLabels[] = {"Increase font size", "Decrease font size",
+                                        "Back to library"};
+  const bool enabled[] = {canChangeFont(1), canChangeFont(-1), true};
+  const int rowH = display.textHeight(TextSize::Large) + 24;
+  for (int i = 0; i < int(MenuItem::Count); ++i) {
+    const bool selected = i == int(menuItem_);
+    if (selected) display.fillRect(kMargin / 2, y, w - kMargin, rowH, Color::Black);
+    const Color unselectedColor = enabled[i] ? Color::Black : Color::LightGray;
+    const Color selectedColor = enabled[i] ? Color::White : Color::DarkGray;
+    display.drawText(kLabels[i], kMargin * 2, y + 12, TextSize::Large, TextAlign::Left,
+                     selected ? selectedColor : unselectedColor);
+    y += rowH + 8;
+  }
+
+  drawFooterLegend(display, "A / B: move    Hold A: select    Hold B: close");
 }
 
 void EReaderApp::drawError(paperos::Display& display) {

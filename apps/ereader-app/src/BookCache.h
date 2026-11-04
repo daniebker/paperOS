@@ -14,21 +14,27 @@ namespace ereader {
 
 constexpr const char* kBooksDir = "/books";
 constexpr const char* kCacheDir = "/books/.cache";
+constexpr const char* kSettingsPath = "/books/.cache/settings.bin";
 
-// Each indexed book has two files in kCacheDir, named after cacheStem():
-//   <stem>.idx  the laid-out text of every page, then a table of page offsets,
-//               then an IndexFooter
-//   <stem>.pos  the last page read
+// Each indexed book has these files in kCacheDir, named after cacheStem():
+//   <stem>-<layout>.idx  the laid-out text of every page, then the tables
+//                        described in IndexFooter, then the footer. One per
+//                        layout, so going back to a font size already used
+//                        needs no re-indexing.
+//   <stem>.pos           the place last read, which applies to every layout
 // Reading a page from the .idx is a single seek, so page turns never touch
 // the EPUB. The index is written under a temporary name and renamed once it
 // is complete, so a power cut can't leave a partial one behind.
+// kSettingsPath is shared by all books.
 
 // Stored at the very end of an .idx file.
 struct IndexFooter {
   uint32_t magic = 0;
   uint32_t fingerprint = 0;  // layoutFingerprint() the index was built with
   uint32_t pageCount = 0;
-  uint32_t tableOffset = 0;  // file offset of pageCount + 1 uint32_t offsets
+  // File offset of two uint32_t tables: pageCount + 1 file offsets of the
+  // pages, then the position of the start of each of the pageCount pages.
+  uint32_t tableOffset = 0;
   char title[96] = {};
   char author[64] = {};
 };
@@ -45,9 +51,17 @@ uint32_t layoutFingerprint(const PageMetrics& metrics);
 bool readIndexFooter(paperos::FileSystem& fs, const std::string& stem, uint32_t fingerprint,
                      IndexFooter& footer);
 
-// Zero-based page last read, 0 for a book not opened before.
+// A place in a book is the number of visible characters before it, ignoring
+// the spaces and line breaks that layout changes. That makes it the same at
+// every font size, unlike a page number.
+
+// 0, the start of the book, if it has not been opened before.
 uint32_t loadPosition(paperos::FileSystem& fs, const std::string& stem);
-bool savePosition(paperos::FileSystem& fs, const std::string& stem, uint32_t page);
+bool savePosition(paperos::FileSystem& fs, const std::string& stem, uint32_t position);
+
+// Reader-wide font size choice, 0 if never saved.
+uint32_t loadFontLevel(paperos::FileSystem& fs);
+bool saveFontLevel(paperos::FileSystem& fs, uint32_t level);
 
 // Pages left after `page` (zero-based), so 0 on the last page.
 uint32_t pagesRemaining(uint32_t page, uint32_t pageCount);
@@ -82,6 +96,8 @@ class BookIndexer {
   std::unique_ptr<PageLayout> layout_;
   std::unique_ptr<paperos::File> out_;
   std::vector<uint32_t> offsets_;
+  std::vector<uint32_t> pagePositions_;
+  uint32_t visibleChars_ = 0;
   std::string stem_;
   size_t nextChapter_ = 0;
   uint64_t totalBytes_ = 0;
@@ -97,11 +113,17 @@ class BookPages {
   void close();
 
   uint32_t pageCount() const { return footer_.pageCount; }
+  const char* title() const { return footer_.title; }  // "" if the book has none
   bool readPage(uint32_t page, std::string& text);
+
+  // Zero-based page holding `position`, which may come from another layout.
+  uint32_t pageAt(uint32_t position) const;
+  uint32_t positionOf(uint32_t page) const { return pagePositions_[page]; }
 
  private:
   std::unique_ptr<paperos::File> file_;
   std::vector<uint32_t> offsets_;
+  std::vector<uint32_t> pagePositions_;
   IndexFooter footer_;
 };
 

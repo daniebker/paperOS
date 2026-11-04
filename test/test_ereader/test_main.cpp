@@ -38,8 +38,13 @@ class FakeDisplay : public Display {
     texts.emplace_back(text);
     lowestY = std::max(lowestY, y);
   }
-  int textHeight(TextSize) const override { return 30; }
-  int textWidth(const char* text, TextSize) const override { return 10 * int(strlen(text)); }
+  int textHeight(TextSize size) const override {
+    return size == TextSize::Small ? 30 : size == TextSize::ExtraLarge ? 60 : 45;
+  }
+  int textWidth(const char* text, TextSize size) const override {
+    const int perChar = size == TextSize::Small ? 10 : size == TextSize::ExtraLarge ? 20 : 15;
+    return perChar * int(strlen(text));
+  }
 
   bool shows(const std::string& text) const {
     return std::find(texts.begin(), texts.end(), text) != texts.end();
@@ -335,6 +340,32 @@ void finishIndexing(EReaderApp& app) {
   for (int i = 0; i < 1000 && app.view() == EReaderApp::View::Indexing; ++i) app.tick();
 }
 
+void closeBookToLibrary(EReaderApp& app) {
+  app.onInput(InputEvent::Back);      // opens the menu
+  app.onInput(InputEvent::Previous);  // wraps round to "Back to library"
+  app.onInput(InputEvent::Select);
+}
+
+// From the book: opens the menu, picks an item and lets any indexing finish.
+void chooseFromMenu(EReaderApp& app, EReaderApp::MenuItem item) {
+  app.onInput(InputEvent::Back);
+  for (int i = 0; i < int(item); ++i) app.onInput(InputEvent::Next);
+  app.onInput(InputEvent::Select);
+  finishIndexing(app);
+}
+
+// The first word of body text on the page being shown.
+std::string firstWordOnPage(EReaderApp& app, FakeDisplay& display) {
+  display.beginFrame(Color::White);
+  app.draw(display);
+  for (const std::string& text : display.texts) {
+    if (text.compare(0, 5, "alpha") == 0 || text.compare(0, 5, "bravo") == 0) {
+      return text.substr(0, 5);
+    }
+  }
+  return "";
+}
+
 constexpr const char* kBookPath = "/books/book.epub";
 
 struct Fixture {
@@ -460,7 +491,12 @@ void test_layout_never_overflows_the_page() {
     size_t start = 0;
     while (start < page.size()) {
       const size_t end = page.find('\n', start);
-      height += end == start ? metrics.paragraphGap : metrics.body.lineHeight;
+      if (end == start) {
+        height += metrics.paragraphGap;
+      } else {
+        height += page[start] == kHeadingMarker ? metrics.heading.lineHeight
+                                                : metrics.body.lineHeight;
+      }
       start = end + 1;
     }
     TEST_ASSERT_LESS_OR_EQUAL(metrics.height, height);
@@ -815,7 +851,7 @@ void test_back_returns_to_library_and_updates_progress() {
   finishIndexing(app);
   app.onInput(InputEvent::Next);
 
-  TEST_ASSERT_TRUE(app.onInput(InputEvent::Back));  // consumed: stays in the app
+  closeBookToLibrary(app);
   ASSERT_VIEW(Library, app);
   TEST_ASSERT_EQUAL_STRING("Fish & Chips", app.books()[0].title.c_str());
   TEST_ASSERT_EQUAL(1, app.books()[0].page);
@@ -829,7 +865,7 @@ void test_finished_book_shows_as_finished() {
   app.onInput(InputEvent::Select);
   finishIndexing(app);
   while (app.pagesLeft() > 0) app.onInput(InputEvent::Next);
-  app.onInput(InputEvent::Back);
+  closeBookToLibrary(app);
   f.display.beginFrame(Color::White);
   app.draw(f.display);
   TEST_ASSERT_TRUE(f.display.showsPart("Finished"));
@@ -843,9 +879,9 @@ void test_saved_position_past_the_end_is_clamped() {
   finishIndexing(app);
   const std::string stem = app.books()[0].stem;
   const uint32_t total = app.pageCount();
-  app.onInput(InputEvent::Back);
+  closeBookToLibrary(app);
 
-  savePosition(f.fs, stem, total + 50);
+  savePosition(f.fs, stem, 100000000);
   app.onOpen();
   app.onInput(InputEvent::Select);
   TEST_ASSERT_EQUAL(total - 1, app.currentPage());
@@ -871,16 +907,18 @@ void test_cancel_leaves_no_index_behind() {
 
 void test_interrupted_index_is_ignored_and_rebuilt() {
   Fixture f;
-  std::string stem;
   {
     EReaderApp app(f.fs, f.display);
     app.onOpen();
-    stem = app.books()[0].stem;
     app.onInput(InputEvent::Select);
-    app.tick();
-    f.fs.files[stem + ".idx"] = "half a file from a power cut, padded out past the footer size" +
-                                std::string(300, '?');
-  }  // the destructor stands in for a reboot, apart from removing the .tmp
+    finishIndexing(app);
+  }
+  for (auto& file : f.fs.files) {
+    if (file.first.size() > 4 && file.first.compare(file.first.size() - 4, 4, ".idx") == 0) {
+      file.second = "half a file from a power cut, padded out past the footer size" +
+                    std::string(300, '?');
+    }
+  }
 
   EReaderApp app(f.fs, f.display);
   app.onOpen();
@@ -891,7 +929,7 @@ void test_interrupted_index_is_ignored_and_rebuilt() {
   ASSERT_VIEW(Reading, app);
 }
 
-void test_changed_layout_reindexes_and_keeps_the_place() {
+void test_changed_layout_reindexes_the_book() {
   Fixture f;
   uint32_t oldTotal = 0;
   {
@@ -911,8 +949,7 @@ void test_changed_layout_reindexes_and_keeps_the_place() {
   finishIndexing(app);
   ASSERT_VIEW(Reading, app);
   TEST_ASSERT_NOT_EQUAL(oldTotal, app.pageCount());
-  TEST_ASSERT_EQUAL(1, app.currentPage());
-  TEST_ASSERT_EQUAL(1, f.fs.countFiles(".idx"));
+  TEST_ASSERT_EQUAL(2, f.fs.countFiles(".idx"));  // one per layout
 }
 
 void test_replacing_a_book_starts_it_over() {
@@ -1025,6 +1062,226 @@ void test_quality_refresh_clears_ghosting_periodically() {
   TEST_ASSERT_TRUE(quality[15]);
 }
 
+void test_hold_b_opens_the_menu_and_closes_it_again() {
+  Fixture f;
+  EReaderApp app(f.fs, f.display);
+  app.onOpen();
+  app.onInput(InputEvent::Select);
+  finishIndexing(app);
+  app.onInput(InputEvent::Next);
+
+  TEST_ASSERT_TRUE(app.onInput(InputEvent::Back));
+  ASSERT_VIEW(Menu, app);
+  TEST_ASSERT_TRUE(app.wantsFullRefresh());
+  app.draw(f.display);
+  TEST_ASSERT_TRUE(f.display.shows("Menu"));
+  TEST_ASSERT_TRUE(f.display.shows("Increase font size"));
+  TEST_ASSERT_TRUE(f.display.shows("Decrease font size"));
+  TEST_ASSERT_TRUE(f.display.shows("Back to library"));
+  TEST_ASSERT_TRUE(f.display.shows("Font size: Small"));
+
+  TEST_ASSERT_TRUE(app.onInput(InputEvent::Back));
+  ASSERT_VIEW(Reading, app);
+  TEST_ASSERT_EQUAL(1, app.currentPage());
+  TEST_ASSERT_TRUE(app.wantsFullRefresh());
+}
+
+void test_menu_selection_wraps_and_does_not_turn_pages() {
+  Fixture f;
+  EReaderApp app(f.fs, f.display);
+  app.onOpen();
+  app.onInput(InputEvent::Select);
+  finishIndexing(app);
+  app.onInput(InputEvent::Back);
+
+  using Item = EReaderApp::MenuItem;
+  TEST_ASSERT_TRUE(app.onInput(InputEvent::Previous));
+  TEST_ASSERT_TRUE(app.selectedMenuItem() == Item::BackToLibrary);
+  TEST_ASSERT_TRUE(app.onInput(InputEvent::Next));
+  TEST_ASSERT_TRUE(app.selectedMenuItem() == Item::IncreaseFont);
+  TEST_ASSERT_TRUE(app.onInput(InputEvent::Next));
+  TEST_ASSERT_TRUE(app.selectedMenuItem() == Item::DecreaseFont);
+  TEST_ASSERT_EQUAL(0, app.currentPage());
+}
+
+void test_increasing_font_keeps_the_place_in_the_text() {
+  Fixture f;
+  EReaderApp app(f.fs, f.display);
+  app.onOpen();
+  app.onInput(InputEvent::Select);
+  finishIndexing(app);
+
+  // Into the second chapter, whose text differs from the first.
+  while (firstWordOnPage(app, f.display) != "bravo") app.onInput(InputEvent::Next);
+  for (int i = 0; i < 2; ++i) app.onInput(InputEvent::Next);
+  const uint32_t smallPages = app.pageCount();
+  const int before = int(app.currentPage() * 1000 / smallPages);
+
+  app.onInput(InputEvent::Back);
+  app.onInput(InputEvent::Select);  // Increase font size is the first item
+  ASSERT_VIEW(Indexing, app);
+  finishIndexing(app);
+  ASSERT_VIEW(Reading, app);
+
+  TEST_ASSERT_EQUAL(1, app.fontLevel());
+  TEST_ASSERT_GREATER_THAN(int(smallPages), int(app.pageCount()));
+  TEST_ASSERT_EQUAL_STRING("bravo", firstWordOnPage(app, f.display).c_str());
+  TEST_ASSERT_INT_WITHIN(50, before, int(app.currentPage() * 1000 / app.pageCount()));
+}
+
+void test_font_size_is_remembered_for_other_books_and_restarts() {
+  Fixture f;
+  f.fs.files["/books/other.epub"] = makeEpub(10);
+  {
+    EReaderApp app(f.fs, f.display);
+    app.onOpen();
+    app.onInput(InputEvent::Select);
+    finishIndexing(app);
+    chooseFromMenu(app, EReaderApp::MenuItem::IncreaseFont);
+    TEST_ASSERT_EQUAL(1, app.fontLevel());
+  }
+
+  EReaderApp app(f.fs, f.display);
+  TEST_ASSERT_EQUAL(0, app.fontLevel());  // nothing is read until the app opens
+  app.onOpen();
+  TEST_ASSERT_EQUAL(1, app.fontLevel());
+
+  // The second book is indexed at the remembered size.
+  const size_t indexes = f.fs.countFiles(".idx");
+  app.onInput(InputEvent::Next);
+  app.onInput(InputEvent::Select);
+  finishIndexing(app);
+  ASSERT_VIEW(Reading, app);
+  TEST_ASSERT_EQUAL(indexes + 1, f.fs.countFiles(".idx"));
+  chooseFromMenu(app, EReaderApp::MenuItem::BackToLibrary);
+  TEST_ASSERT_EQUAL(1, app.fontLevel());
+}
+
+void test_returning_to_a_font_size_needs_no_indexing() {
+  Fixture f;
+  EReaderApp app(f.fs, f.display);
+  app.onOpen();
+  app.onInput(InputEvent::Select);
+  finishIndexing(app);
+  for (int i = 0; i < 5; ++i) app.onInput(InputEvent::Next);
+  chooseFromMenu(app, EReaderApp::MenuItem::IncreaseFont);
+
+  f.fs.opens.clear();
+  app.onInput(InputEvent::Back);
+  app.onInput(InputEvent::Next);
+  app.onInput(InputEvent::Select);  // Decrease font size
+  ASSERT_VIEW(Reading, app);
+  TEST_ASSERT_EQUAL(0, app.fontLevel());
+  TEST_ASSERT_EQUAL(0, f.fs.opens[kBookPath]);
+  TEST_ASSERT_EQUAL(5, app.currentPage());  // same layout, so the exact page
+}
+
+void test_font_size_stops_at_both_ends() {
+  Fixture f;
+  EReaderApp app(f.fs, f.display);
+  app.onOpen();
+  app.onInput(InputEvent::Select);
+  finishIndexing(app);
+
+  app.onInput(InputEvent::Back);
+  app.onInput(InputEvent::Next);
+  TEST_ASSERT_FALSE(app.onInput(InputEvent::Select));  // already the smallest
+  ASSERT_VIEW(Menu, app);
+  app.onInput(InputEvent::Back);
+
+  chooseFromMenu(app, EReaderApp::MenuItem::IncreaseFont);
+  chooseFromMenu(app, EReaderApp::MenuItem::IncreaseFont);
+  TEST_ASSERT_EQUAL(2, app.fontLevel());
+  app.onInput(InputEvent::Back);
+  app.draw(f.display);
+  TEST_ASSERT_TRUE(f.display.shows("Font size: Large"));
+  TEST_ASSERT_FALSE(app.onInput(InputEvent::Select));  // already the largest
+  ASSERT_VIEW(Menu, app);
+}
+
+void test_cancelling_font_change_indexing_keeps_book_usable() {
+  Fixture f;
+  EReaderApp app(f.fs, f.display);
+  app.onOpen();
+  app.onInput(InputEvent::Select);
+  finishIndexing(app);
+  app.onInput(InputEvent::Next);
+
+  app.onInput(InputEvent::Back);
+  app.onInput(InputEvent::Select);
+  ASSERT_VIEW(Indexing, app);
+  TEST_ASSERT_TRUE(app.onInput(InputEvent::Back));
+  ASSERT_VIEW(Library, app);
+  TEST_ASSERT_EQUAL(0, f.fs.countFiles(".tmp"));
+
+  app.onInput(InputEvent::Select);
+  finishIndexing(app);
+  ASSERT_VIEW(Reading, app);
+}
+
+void test_unusable_font_setting_falls_back_to_the_default() {
+  Fixture f;
+  saveFontLevel(f.fs, 99);
+  EReaderApp app(f.fs, f.display);
+  app.onOpen();
+  TEST_ASSERT_EQUAL(0, app.fontLevel());
+
+  f.fs.files[kSettingsPath] = "x";
+  app.onOpen();
+  TEST_ASSERT_EQUAL(0, app.fontLevel());
+}
+
+void test_position_round_trips_within_a_layout() {
+  Fixture f;
+  EReaderApp app(f.fs, f.display);
+  app.onOpen();
+  app.onInput(InputEvent::Select);
+  finishIndexing(app);
+  const std::string stem = app.books()[0].stem;
+  const uint32_t total = app.pageCount();
+
+  // Exact on the layout it was saved from, including the first and last page.
+  BookPages pages;
+  TEST_ASSERT_TRUE(pages.open(f.fs, stem, app.layoutFingerprint()));
+  for (uint32_t page = 0; page < total; ++page) {
+    TEST_ASSERT_EQUAL(page, pages.pageAt(pages.positionOf(page)));
+  }
+
+  // Anywhere inside a page finds that page.
+  TEST_ASSERT_EQUAL(1, pages.pageAt(pages.positionOf(2) - 1));
+  TEST_ASSERT_EQUAL(2, pages.pageAt(pages.positionOf(2) + 1));
+  TEST_ASSERT_EQUAL(0, pages.pageAt(0));
+}
+
+void test_positions_are_the_same_text_at_every_font_size() {
+  Fixture f;
+  EReaderApp app(f.fs, f.display);
+  app.onOpen();
+  app.onInput(InputEvent::Select);
+  finishIndexing(app);
+  const std::string stem = app.books()[0].stem;
+
+  BookPages small;
+  TEST_ASSERT_TRUE(small.open(f.fs, stem, app.layoutFingerprint()));
+  chooseFromMenu(app, EReaderApp::MenuItem::IncreaseFont);
+  BookPages medium;
+  TEST_ASSERT_TRUE(medium.open(f.fs, stem, app.layoutFingerprint()));
+  TEST_ASSERT_GREATER_THAN(int(small.pageCount()), int(medium.pageCount()));
+
+  // The end of each book is the same number of characters in.
+  std::string smallLast;
+  std::string mediumLast;
+  TEST_ASSERT_TRUE(small.readPage(small.pageCount() - 1, smallLast));
+  TEST_ASSERT_TRUE(medium.readPage(medium.pageCount() - 1, mediumLast));
+  const auto visible = [](const std::string& text) {
+    return text.size() - size_t(std::count(text.begin(), text.end(), ' ')) -
+           size_t(std::count(text.begin(), text.end(), '\n')) -
+           size_t(std::count(text.begin(), text.end(), kHeadingMarker));
+  };
+  TEST_ASSERT_EQUAL(small.positionOf(small.pageCount() - 1) + visible(smallLast),
+                    medium.positionOf(medium.pageCount() - 1) + visible(mediumLast));
+}
+
 void test_long_title_is_shortened_to_fit() {
   Fixture f;
   f.fs.files.clear();
@@ -1035,6 +1292,7 @@ void test_long_title_is_shortened_to_fit() {
   app.draw(f.display);
   TEST_ASSERT_TRUE(f.display.showsPart("..."));
   for (const std::string& text : f.display.texts) {
+    if (text.find("...") == std::string::npos) continue;
     TEST_ASSERT_LESS_OR_EQUAL(540, f.display.textWidth(text.c_str(), TextSize::Medium));
   }
 }
@@ -1078,7 +1336,7 @@ int main(int, char**) {
   RUN_TEST(test_saved_position_past_the_end_is_clamped);
   RUN_TEST(test_cancel_leaves_no_index_behind);
   RUN_TEST(test_interrupted_index_is_ignored_and_rebuilt);
-  RUN_TEST(test_changed_layout_reindexes_and_keeps_the_place);
+  RUN_TEST(test_changed_layout_reindexes_the_book);
   RUN_TEST(test_replacing_a_book_starts_it_over);
   RUN_TEST(test_bad_books_show_an_error_and_recover);
   RUN_TEST(test_corrupt_chapter_fails_indexing_cleanly);
@@ -1086,5 +1344,15 @@ int main(int, char**) {
   RUN_TEST(test_full_sd_card_fails_indexing_cleanly);
   RUN_TEST(test_quality_refresh_clears_ghosting_periodically);
   RUN_TEST(test_long_title_is_shortened_to_fit);
+  RUN_TEST(test_hold_b_opens_the_menu_and_closes_it_again);
+  RUN_TEST(test_menu_selection_wraps_and_does_not_turn_pages);
+  RUN_TEST(test_increasing_font_keeps_the_place_in_the_text);
+  RUN_TEST(test_font_size_is_remembered_for_other_books_and_restarts);
+  RUN_TEST(test_returning_to_a_font_size_needs_no_indexing);
+  RUN_TEST(test_font_size_stops_at_both_ends);
+  RUN_TEST(test_cancelling_font_change_indexing_keeps_book_usable);
+  RUN_TEST(test_unusable_font_setting_falls_back_to_the_default);
+  RUN_TEST(test_position_round_trips_within_a_layout);
+  RUN_TEST(test_positions_are_the_same_text_at_every_font_size);
   return UNITY_END();
 }

@@ -1,5 +1,6 @@
 #include "BookCache.h"
 
+#include <algorithm>
 #include <cstdio>
 #include <cstring>
 
@@ -7,8 +8,9 @@ namespace ereader {
 
 namespace {
 
-constexpr uint32_t kIndexMagic = 0x31494250;     // "PBI1"; bump when the format changes
-constexpr uint32_t kPositionMagic = 0x31504250;  // "PBP1"
+constexpr uint32_t kIndexMagic = 0x32494250;     // "PBI2"; bump when the format changes
+constexpr uint32_t kPositionMagic = 0x32504250;  // "PBP2"
+constexpr uint32_t kSettingsMagic = 0x31534250;  // "PBS1"
 
 // FNV-1a.
 uint32_t hashBytes(const void* data, size_t size, uint32_t hash = 2166136261u) {
@@ -24,7 +26,11 @@ uint32_t hashFont(const FontMetrics& font, uint32_t hash) {
   return hashBytes(font.widths, sizeof(font.widths), hash);
 }
 
-std::string indexPath(const std::string& stem) { return stem + ".idx"; }
+std::string indexPath(const std::string& stem, uint32_t fingerprint) {
+  char suffix[16];
+  snprintf(suffix, sizeof(suffix), "-%08x.idx", unsigned(fingerprint));
+  return stem + suffix;
+}
 std::string temporaryPath(const std::string& stem) { return stem + ".tmp"; }
 std::string positionPath(const std::string& stem) { return stem + ".pos"; }
 
@@ -53,7 +59,8 @@ uint32_t layoutFingerprint(const PageMetrics& metrics) {
 
 bool readIndexFooter(paperos::FileSystem& fs, const std::string& stem, uint32_t fingerprint,
                      IndexFooter& footer) {
-  std::unique_ptr<paperos::File> file = fs.open(indexPath(stem).c_str(), paperos::FileMode::Read);
+  std::unique_ptr<paperos::File> file =
+      fs.open(indexPath(stem, fingerprint).c_str(), paperos::FileMode::Read);
   if (!file || file->size() < sizeof(IndexFooter)) return false;
   if (!file->seek(file->size() - sizeof(IndexFooter))) return false;
   if (file->read(&footer, sizeof(footer)) != sizeof(footer)) return false;
@@ -68,10 +75,24 @@ uint32_t loadPosition(paperos::FileSystem& fs, const std::string& stem) {
   return record[0] == kPositionMagic ? record[1] : 0;
 }
 
-bool savePosition(paperos::FileSystem& fs, const std::string& stem, uint32_t page) {
+bool savePosition(paperos::FileSystem& fs, const std::string& stem, uint32_t position) {
   std::unique_ptr<paperos::File> file =
       fs.open(positionPath(stem).c_str(), paperos::FileMode::Write);
-  const uint32_t record[2] = {kPositionMagic, page};
+  const uint32_t record[2] = {kPositionMagic, position};
+  return file && file->write(record, sizeof(record)) == sizeof(record);
+}
+
+uint32_t loadFontLevel(paperos::FileSystem& fs) {
+  std::unique_ptr<paperos::File> file = fs.open(kSettingsPath, paperos::FileMode::Read);
+  uint32_t record[2] = {0, 0};
+  if (!file || file->read(record, sizeof(record)) != sizeof(record)) return 0;
+  return record[0] == kSettingsMagic ? record[1] : 0;
+}
+
+bool saveFontLevel(paperos::FileSystem& fs, uint32_t level) {
+  fs.makeDir(kCacheDir);  // fails harmlessly if it exists
+  std::unique_ptr<paperos::File> file = fs.open(kSettingsPath, paperos::FileMode::Write);
+  const uint32_t record[2] = {kSettingsMagic, level};
   return file && file->write(record, sizeof(record)) == sizeof(record);
 }
 
@@ -96,6 +117,8 @@ bool BookIndexer::start(const std::string& bookPath, const std::string& stem) {
   totalBytes_ = 0;
   for (size_t i = 0; i < epub_.chapterCount(); ++i) totalBytes_ += epub_.chapterBytes(i);
   offsets_.assign(1, 0);
+  pagePositions_.clear();
+  visibleChars_ = 0;
   layout_.reset(new PageLayout(metrics_, [this](const std::string& page) { writePage(page); }));
   return true;
 }
@@ -103,6 +126,11 @@ bool BookIndexer::start(const std::string& bookPath, const std::string& stem) {
 void BookIndexer::writePage(const std::string& page) {
   if (out_->write(page.data(), page.size()) != page.size()) writeFailed_ = true;
   offsets_.push_back(offsets_.back() + uint32_t(page.size()));
+
+  pagePositions_.push_back(visibleChars_);
+  for (const char c : page) {
+    if (c != ' ' && c != '\n' && c != kHeadingMarker) ++visibleChars_;
+  }
 }
 
 BookIndexer::Status BookIndexer::step() {
@@ -134,14 +162,16 @@ BookIndexer::Status BookIndexer::finish() {
   copyTruncated(footer.title, sizeof(footer.title), epub_.title());
   copyTruncated(footer.author, sizeof(footer.author), epub_.author());
 
-  const size_t tableBytes = offsets_.size() * sizeof(uint32_t);
-  const bool written = out_->write(offsets_.data(), tableBytes) == tableBytes &&
+  const size_t offsetBytes = offsets_.size() * sizeof(uint32_t);
+  const size_t positionBytes = pagePositions_.size() * sizeof(uint32_t);
+  const bool written = out_->write(offsets_.data(), offsetBytes) == offsetBytes &&
+                       out_->write(pagePositions_.data(), positionBytes) == positionBytes &&
                        out_->write(&footer, sizeof(footer)) == sizeof(footer);
   if (!written) return fail("Could not write to the SD card");
   out_.reset();
 
-  const std::string finalPath = indexPath(stem_);
-  fs_.remove(finalPath.c_str());  // a stale index for another layout
+  const std::string finalPath = indexPath(stem_, footer.fingerprint);
+  fs_.remove(finalPath.c_str());  // a damaged index being replaced
   if (!fs_.rename(temporaryPath(stem_).c_str(), finalPath.c_str())) {
     return fail("Could not write to the SD card");
   }
@@ -170,13 +200,16 @@ int BookIndexer::percent() const {
 bool BookPages::open(paperos::FileSystem& fs, const std::string& stem, uint32_t fingerprint) {
   close();
   if (!readIndexFooter(fs, stem, fingerprint, footer_)) return false;
-  file_ = fs.open(indexPath(stem).c_str(), paperos::FileMode::Read);
+  file_ = fs.open(indexPath(stem, fingerprint).c_str(), paperos::FileMode::Read);
   if (!file_) return false;
 
   offsets_.resize(size_t(footer_.pageCount) + 1);
-  const size_t tableBytes = offsets_.size() * sizeof(uint32_t);
+  pagePositions_.resize(footer_.pageCount);
+  const size_t offsetBytes = offsets_.size() * sizeof(uint32_t);
+  const size_t positionBytes = pagePositions_.size() * sizeof(uint32_t);
   if (!file_->seek(footer_.tableOffset) ||
-      file_->read(offsets_.data(), tableBytes) != tableBytes) {
+      file_->read(offsets_.data(), offsetBytes) != offsetBytes ||
+      file_->read(pagePositions_.data(), positionBytes) != positionBytes) {
     close();
     return false;
   }
@@ -186,7 +219,14 @@ bool BookPages::open(paperos::FileSystem& fs, const std::string& stem, uint32_t 
 void BookPages::close() {
   file_.reset();
   offsets_.clear();
+  pagePositions_.clear();
   footer_ = IndexFooter();
+}
+
+uint32_t BookPages::pageAt(uint32_t position) const {
+  if (pagePositions_.empty()) return 0;
+  const auto after = std::upper_bound(pagePositions_.begin(), pagePositions_.end(), position);
+  return uint32_t(after - pagePositions_.begin()) - 1;
 }
 
 bool BookPages::readPage(uint32_t page, std::string& text) {

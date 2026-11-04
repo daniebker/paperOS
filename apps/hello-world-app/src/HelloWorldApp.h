@@ -12,8 +12,8 @@
 //   [owner]
 //     name = "Dan"
 //
-// A / B cycle the greeting through several languages, showing how an app
-// receives input. Hold B returns to the home screen (handled by the shell, because onInput()
+// A / B cycle the greeting and the introduction through several languages,
+// showing how an app receives input. Hold B returns to the home screen (handled by the shell, because onInput()
 // does not consume Back).
 class HelloWorldApp : public paperos::App {
  public:
@@ -32,7 +32,8 @@ class HelloWorldApp : public paperos::App {
 
   // Owner's name from the config, or "" if it is not set.
   const char* ownerName() const;
-  // "My name is <name>", or a hint when no name is configured.
+  // "My name is <name>" in the current language, or "Name is not set yet"
+  // when no name is configured.
   std::string introduction() const;
 
  private:

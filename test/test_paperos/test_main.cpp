@@ -237,8 +237,19 @@ void test_hello_world_app_flow() {
   TEST_ASSERT_TRUE(shell.handle(toInputEvent(Button::B, Gesture::ShortPress)));
   shell.draw(display);
   TEST_ASSERT_TRUE(display.shows("Hallo, Welt!"));
-  TEST_ASSERT_TRUE(display.shows("My name is Dan"));  // name stays on every language
+  TEST_ASSERT_TRUE(display.shows("Mein Name ist Dan"));  // introduction follows the language
+  TEST_ASSERT_FALSE(display.shows("My name is Dan"));
   TEST_ASSERT_TRUE(display.shows("2 / 5"));
+  const char* const expectedIntros[] = {"My name is Dan", "Mein Name ist Dan",
+                                        "Je m'appelle Dan", "Me llamo Dan", "Mi chiamo Dan"};
+  TEST_ASSERT_EQUAL_INT(5, HelloWorldApp::greetingCount());
+  for (size_t i = 2; i < 5; ++i) {
+    shell.handle(toInputEvent(Button::B, Gesture::ShortPress));
+    TEST_ASSERT_EQUAL_STRING(expectedIntros[i], hello.introduction().c_str());
+  }
+  shell.handle(toInputEvent(Button::B, Gesture::ShortPress));  // wraps back to English
+  TEST_ASSERT_EQUAL_STRING(expectedIntros[0], hello.introduction().c_str());
+  shell.handle(toInputEvent(Button::B, Gesture::ShortPress));  // German again
   for (size_t i = 0; i < HelloWorldApp::greetingCount(); ++i) {  // full lap
     shell.handle(toInputEvent(Button::B, Gesture::ShortPress));
   }
@@ -264,7 +275,9 @@ void test_hello_world_app_without_owner_name() {
   display.beginFrame(Color::White);
   hello.draw(display);
   TEST_ASSERT_TRUE(display.shows("Hello, World!"));
-  TEST_ASSERT_TRUE(display.shows("My name is not set yet"));
+  TEST_ASSERT_TRUE(display.shows("Name is not set yet"));
+  hello.onInput(InputEvent::Next);  // same message in every language
+  TEST_ASSERT_EQUAL_STRING("Name is not set yet", hello.introduction().c_str());
 }
 
 int main(int, char**) {

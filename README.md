@@ -27,7 +27,7 @@ At boot, paperOS reads `config.toml` from the root of the SD card. There's an ex
 
 | Setting        | Used by     | Effect                                         |
 |----------------|-------------|------------------------------------------------|
-| `[owner] name` | Hello World | Shows "My name is <name>" under the greeting   |
+| `[owner] name` | Hello World | Shows "My name is <name>" under the greeting, in the selected language |
 
 The file is only read at startup, so restart the device after changing it. If the card or file is missing, paperOS still starts and apps use their defaults.
 

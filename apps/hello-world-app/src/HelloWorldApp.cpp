@@ -2,14 +2,21 @@
 
 namespace {
 
-const char* const kGreetings[] = {
-    "Hello, World!",        // English
-    "Hallo, Welt!",         // German
-    "Bonjour, le monde !",  // French
-    "Hola, mundo!",         // Spanish
-    "Ciao, mondo!",         // Italian
+// Each language's greeting and the phrase that introduces the owner's name.
+// Text stays ASCII because the display fonts don't include accented letters.
+struct Language {
+  const char* greeting;
+  const char* introduction;  // followed by the owner's name
 };
-constexpr size_t kGreetingCount = sizeof(kGreetings) / sizeof(kGreetings[0]);
+
+const Language kLanguages[] = {
+    {"Hello, World!", "My name is "},             // English
+    {"Hallo, Welt!", "Mein Name ist "},           // German
+    {"Bonjour, le monde !", "Je m'appelle "},     // French
+    {"Hola, mundo!", "Me llamo "},                // Spanish
+    {"Ciao, mondo!", "Mi chiamo "},               // Italian
+};
+constexpr size_t kGreetingCount = sizeof(kLanguages) / sizeof(kLanguages[0]);
 
 }  // namespace
 
@@ -21,7 +28,7 @@ using paperos::TextSize;
 size_t HelloWorldApp::greetingCount() { return kGreetingCount; }
 
 const char* HelloWorldApp::greeting(size_t index) {
-  return index < kGreetingCount ? kGreetings[index] : "";
+  return index < kGreetingCount ? kLanguages[index].greeting : "";
 }
 
 void HelloWorldApp::onOpen() { greetingIndex_ = 0; }
@@ -43,8 +50,8 @@ const char* HelloWorldApp::ownerName() const { return config_.getString("owner",
 
 std::string HelloWorldApp::introduction() const {
   const char* owner = ownerName();
-  if (*owner == '\0') return "My name is not set yet";
-  return std::string("My name is ") + owner;
+  if (*owner == '\0') return "Name is not set yet";
+  return std::string(kLanguages[greetingIndex_].introduction) + owner;
 }
 
 void HelloWorldApp::draw(paperos::Display& display) {

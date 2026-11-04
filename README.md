@@ -123,7 +123,7 @@ pio device monitor -e paperdiy
 
 ### Troubleshooting
 
-- **No serial port shows up, or the upload can't connect:** try another USB-C cable or port. Then put the ESP32-S3 into download mode and upload again. To enter download mode, hold the BOOT button (GPIO0) while pressing reset or plugging in USB. See M5Stack's [PaperDIY documentation](https://docs.m5stack.com/en/products/sku/K159-B) for where these are on your board.
+- **No serial port shows up, or the upload can't connect:** try another USB-C cable or port. Then put the PaperDIY into download (boot) mode by long-holding the power button, and run the upload again. If it doesn't start paperOS after the upload finishes, restart it.
 - **Permission denied on the port (Linux):** see the udev rules and group step in [Install PlatformIO](#1-install-platformio).
 - **Screen stays blank:** check the log for `need OPI-PSRAM enabled`. The e-paper driver needs the octal PSRAM settings in `platformio.ini`, so build with the `paperdiy` environment rather than a generic ESP32-S3 one.
 

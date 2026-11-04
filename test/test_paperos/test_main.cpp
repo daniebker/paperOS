@@ -14,8 +14,8 @@ namespace {
 // Records drawn text so tests can assert on what is on screen.
 class FakeDisplay : public Display {
  public:
-  int width() const override { return 960; }
-  int height() const override { return 540; }
+  int width() const override { return 540; }  // portrait, like the device
+  int height() const override { return 960; }
   void beginFrame(Color) override {
     texts.clear();
     ++frames;
@@ -276,6 +276,7 @@ void test_hello_world_app_without_owner_name() {
   hello.draw(display);
   TEST_ASSERT_TRUE(display.shows("Hello, World!"));
   TEST_ASSERT_TRUE(display.shows("Name is not set yet"));
+  TEST_ASSERT_TRUE(display.shows("Set [owner] name in config.toml"));
   hello.onInput(InputEvent::Next);  // same message in every language
   TEST_ASSERT_EQUAL_STRING("Name is not set yet", hello.introduction().c_str());
 }

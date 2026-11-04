@@ -15,8 +15,9 @@
 
 namespace {
 
-// Landscape (960x540). Change if the device is held in portrait.
-constexpr uint8_t kDisplayRotation = 1;
+// Portrait (540x960). Use 2 for portrait turned upside down, or 1 / 3 for
+// landscape (960x540).
+constexpr uint8_t kDisplayRotation = 0;
 constexpr uint32_t kLoopDelayMs = 10;
 
 M5Display* display = nullptr;

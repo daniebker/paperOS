@@ -75,9 +75,13 @@ void HelloWorldApp::draw(paperos::Display& display) {
   display.drawText(position.c_str(), w / 2, y, TextSize::Small, TextAlign::Center,
                    Color::DarkGray);
 
-  const char* footer = *ownerName() == '\0'
-                           ? "Set [owner] name in config.toml    A / B: language    Hold B: back"
-                           : "A / B: change language    Hold B: back";
-  display.drawText(footer, w / 2, h - 24 - smallH, TextSize::Small, TextAlign::Center,
-                   Color::DarkGray);
+  // Footer, bottom up. Each line fits the 540 px portrait width.
+  int footerY = h - 24 - smallH;
+  display.drawText("A / B: change language    Hold B: back", w / 2, footerY, TextSize::Small,
+                   TextAlign::Center, Color::DarkGray);
+  if (*ownerName() == '\0') {
+    footerY -= smallH + 8;
+    display.drawText("Set [owner] name in config.toml", w / 2, footerY, TextSize::Small,
+                     TextAlign::Center, Color::DarkGray);
+  }
 }

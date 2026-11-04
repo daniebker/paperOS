@@ -55,21 +55,95 @@ test/                     host unit tests for the core and apps
 
 The core and apps never include M5Stack headers. That keeps them portable and lets them be unit tested on a PC.
 
-## Building
+## Flashing the firmware
 
-Requires [PlatformIO](https://platformio.org/).
+### 1. Install PlatformIO
+
+Install either one:
+
+- **VS Code:** the [PlatformIO IDE extension](https://platformio.org/install/ide?install=vscode).
+- **Command line:** [PlatformIO Core](https://docs.platformio.org/en/latest/core/installation/index.html), for example:
+
+```bash
+pip install -U platformio
+```
+
+On Linux, install the PlatformIO [udev rules](https://docs.platformio.org/en/latest/core/installation/udev-rules.html) so you can open the serial port without root. Depending on your distribution you may also need to add yourself to the `dialout` (or `uucp`) group, then log out and back in.
+
+### 2. Get the code
+
+```bash
+git clone https://github.com/daniebker/paperOS.git
+```
+
+```bash
+cd paperOS
+```
+
+### 3. Build
 
 ```bash
 pio run -e paperdiy
 ```
 
+The first build takes a few minutes. PlatformIO downloads the ESP32-S3 toolchain, the Arduino framework, M5Unified and M5GFX.
+
+### 4. Connect the PaperDIY and upload
+
+1. Connect the PaperDIY to your computer with a USB-C **data** cable. Some cables only carry power.
+2. Upload:
+
 ```bash
 pio run -e paperdiy -t upload
 ```
 
+PlatformIO picks the port automatically. If more than one device is connected, name the port. It is usually `/dev/ttyACM0` on Linux, `/dev/cu.usbmodem*` on macOS and `COMx` on Windows:
+
+```bash
+pio run -e paperdiy -t upload --upload-port /dev/ttyACM0
+```
+
+In VS Code, use **PlatformIO: Upload** from the status bar or the PlatformIO sidebar. Select the `paperdiy` environment first.
+
+When the upload finishes, the device restarts into paperOS and shows the home screen.
+
+### 5. Prepare the SD card (optional)
+
+1. Copy [`sdcard/config.toml`](sdcard/config.toml) to the root of a FAT32-formatted microSD card.
+2. Edit `name` to your own.
+3. Insert the card and restart the device.
+
+### 6. Watch the logs (optional)
+
+The serial log shows boot messages, including whether `config.toml` was found and parsed:
+
+```bash
+pio device monitor -e paperdiy
+```
+
+### Troubleshooting
+
+- **No serial port shows up, or the upload can't connect:** try another USB-C cable or port. Then put the ESP32-S3 into download mode and upload again. To enter download mode, hold the BOOT button (GPIO0) while pressing reset or plugging in USB. See M5Stack's [PaperDIY documentation](https://docs.m5stack.com/en/products/sku/K159-B) for where these are on your board.
+- **Permission denied on the port (Linux):** see the udev rules and group step in [Install PlatformIO](#1-install-platformio).
+- **Screen stays blank:** check the log for `need OPI-PSRAM enabled`. The e-paper driver needs the octal PSRAM settings in `platformio.ini`, so build with the `paperdiy` environment rather than a generic ESP32-S3 one.
+
+### Flashing a prebuilt binary without PlatformIO
+
+`pio run -e paperdiy` writes its images to `.pio/build/paperdiy/`. To flash them on another machine with [esptool](https://docs.espressif.com/projects/esptool/en/latest/esp32s3/), also copy `boot_app0.bin` from `~/.platformio/packages/framework-arduinoespressif32/tools/partitions/`. Then run:
+
+```bash
+esptool.py --chip esp32s3 --port /dev/ttyACM0 --baud 921600 write_flash 0x0 bootloader.bin 0x8000 partitions.bin 0xe000 boot_app0.bin 0x10000 firmware.bin
+```
+
+## Running the tests
+
+The core and apps have unit tests that run on your computer, with no device needed:
+
 ```bash
 pio test -e native
 ```
+
+## Hardware notes
 
 The firmware uses [M5Unified](https://github.com/m5stack/M5Unified) 0.2.29 and [M5GFX](https://github.com/m5stack/M5GFX) 0.2.36. These are the versions that added PaperDIY support: board auto-detection, e-paper power through the M5PM1, and buttons A (GPIO4) and B (GPIO3).
 

@@ -14,6 +14,7 @@ constexpr size_t kGreetingCount = sizeof(kGreetings) / sizeof(kGreetings[0]);
 }  // namespace
 
 using paperos::Color;
+using paperos::InputEvent;
 using paperos::TextAlign;
 using paperos::TextSize;
 
@@ -21,6 +22,21 @@ size_t HelloWorldApp::greetingCount() { return kGreetingCount; }
 
 const char* HelloWorldApp::greeting(size_t index) {
   return index < kGreetingCount ? kGreetings[index] : "";
+}
+
+void HelloWorldApp::onOpen() { greetingIndex_ = 0; }
+
+bool HelloWorldApp::onInput(InputEvent event) {
+  switch (event) {
+    case InputEvent::Previous:
+      greetingIndex_ = (greetingIndex_ + kGreetingCount - 1) % kGreetingCount;
+      return true;
+    case InputEvent::Next:
+      greetingIndex_ = (greetingIndex_ + 1) % kGreetingCount;
+      return true;
+    default:
+      return false;  // Back falls through to the shell, which closes the app.
+  }
 }
 
 const char* HelloWorldApp::ownerName() const { return config_.getString("owner", "name", ""); }
@@ -35,24 +51,26 @@ void HelloWorldApp::draw(paperos::Display& display) {
   const int w = display.width();
   const int h = display.height();
 
-  const int greetingH = display.textHeight(TextSize::Medium);
-  const int greetingGap = 10;
   const int titleH = display.textHeight(TextSize::Title);
-  const int introGap = 36;
-
-  const int blockH = int(kGreetingCount) * (greetingH + greetingGap) - greetingGap + introGap + titleH;
-  int y = (h - blockH) / 2;
-  for (size_t i = 0; i < kGreetingCount; ++i) {
-    display.drawText(kGreetings[i], w / 2, y, TextSize::Medium, TextAlign::Center);
-    y += greetingH + greetingGap;
-  }
-  y += introGap - greetingGap;
-  display.drawText(introduction().c_str(), w / 2, y, TextSize::Title, TextAlign::Center);
-
+  const int mediumH = display.textHeight(TextSize::Medium);
   const int smallH = display.textHeight(TextSize::Small);
+  const int gap = 28;
+
+  // Greeting, owner introduction and language position, centred as a block.
+  const int blockH = titleH + gap + mediumH + gap + smallH;
+  int y = (h - blockH) / 2;
+  display.drawText(greeting(), w / 2, y, TextSize::Title, TextAlign::Center);
+  y += titleH + gap;
+  display.drawText(introduction().c_str(), w / 2, y, TextSize::Medium, TextAlign::Center);
+  y += mediumH + gap;
+  const std::string position =
+      std::to_string(greetingIndex_ + 1) + " / " + std::to_string(kGreetingCount);
+  display.drawText(position.c_str(), w / 2, y, TextSize::Small, TextAlign::Center,
+                   Color::DarkGray);
+
   const char* footer = *ownerName() == '\0'
-                           ? "Add [owner] name = \"...\" to config.toml on the SD card    Hold B: back"
-                           : "Hold B: back";
+                           ? "Set [owner] name in config.toml    A / B: language    Hold B: back"
+                           : "A / B: change language    Hold B: back";
   display.drawText(footer, w / 2, h - 24 - smallH, TextSize::Small, TextAlign::Center,
                    Color::DarkGray);
 }

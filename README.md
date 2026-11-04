@@ -1,7 +1,7 @@
 # paperOS
 A firmware for the PaperDIY by M5Stack.
 
-paperOS is a small app launcher for the PaperDIY's 4.7" e-paper display. Planned apps include an e-reader, a to-do list and a calendar view. Right now it ships with a sample **Hello World** app.
+paperOS is a small app launcher for the PaperDIY's 4.7" e-paper display. Planned apps include an e-reader, a to-do list and a calendar view. Right now it ships with a sample **Hello World** app. It greets you in five languages (press A / B to switch) and introduces the owner named in `config.toml`.
 
 ## Controls
 
@@ -27,7 +27,7 @@ At boot, paperOS reads `config.toml` from the root of the SD card. There's an ex
 
 | Setting        | Used by     | Effect                                         |
 |----------------|-------------|------------------------------------------------|
-| `[owner] name` | Hello World | Shows "My name is <name>" under the greetings  |
+| `[owner] name` | Hello World | Shows "My name is <name>" under the greeting   |
 
 The file is only read at startup, so restart the device after changing it. If the card or file is missing, paperOS still starts and apps use their defaults.
 

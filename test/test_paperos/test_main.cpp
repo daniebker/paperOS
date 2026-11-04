@@ -229,16 +229,32 @@ void test_hello_world_app_flow() {
   shell.handle(toInputEvent(Button::A, Gesture::LongPress));  // hold A: open
   TEST_ASSERT_TRUE(shell.activeApp() == &hello);
   shell.draw(display);
-  TEST_ASSERT_TRUE(HelloWorldApp::greetingCount() >= 2);
-  for (size_t i = 0; i < HelloWorldApp::greetingCount(); ++i) {
-    TEST_ASSERT_TRUE(display.shows(HelloWorldApp::greeting(i)));  // every language at once
-  }
   TEST_ASSERT_TRUE(display.shows("Hello, World!"));
-  TEST_ASSERT_TRUE(display.shows("Hallo, Welt!"));
   TEST_ASSERT_TRUE(display.shows("My name is Dan"));
+  TEST_ASSERT_TRUE(display.shows("1 / 5"));
+
+  // B cycles forward through every language and wraps around.
+  TEST_ASSERT_TRUE(shell.handle(toInputEvent(Button::B, Gesture::ShortPress)));
+  shell.draw(display);
+  TEST_ASSERT_TRUE(display.shows("Hallo, Welt!"));
+  TEST_ASSERT_TRUE(display.shows("My name is Dan"));  // name stays on every language
+  TEST_ASSERT_TRUE(display.shows("2 / 5"));
+  for (size_t i = 0; i < HelloWorldApp::greetingCount(); ++i) {  // full lap
+    shell.handle(toInputEvent(Button::B, Gesture::ShortPress));
+  }
+  TEST_ASSERT_EQUAL_STRING("Hallo, Welt!", hello.greeting());
+
+  // A cycles backwards, wrapping from the first to the last language (index 1 -> 0 -> last).
+  shell.handle(toInputEvent(Button::A, Gesture::ShortPress));
+  shell.handle(toInputEvent(Button::A, Gesture::ShortPress));
+  TEST_ASSERT_EQUAL_STRING(HelloWorldApp::greeting(HelloWorldApp::greetingCount() - 1),
+                           hello.greeting());
 
   shell.handle(toInputEvent(Button::B, Gesture::LongPress));  // hold B: exit
   TEST_ASSERT_TRUE(shell.activeApp() == nullptr);
+
+  shell.handle(toInputEvent(Button::A, Gesture::LongPress));  // reopen resets greeting
+  TEST_ASSERT_EQUAL_STRING("Hello, World!", hello.greeting());
 }
 
 void test_hello_world_app_without_owner_name() {

@@ -50,7 +50,7 @@ lib/paperos-core/         hardware-independent OS core
 apps/                     one folder per app
   hello-world-app/        sample app
 sdcard/                   example files to copy onto the SD card
-.github/workflows/        CI: unit tests and firmware build
+.github/workflows/        CI: tests + firmware build, and releases on version tags
 test/                     host unit tests for the core and apps
 ```
 
@@ -130,7 +130,11 @@ pio device monitor -e paperdiy
 
 ### Flashing a prebuilt binary without PlatformIO
 
-GitHub Actions builds the firmware on every push to `main` and every pull request (`.github/workflows/build.yml`). To download it, open the run on the repository's **Actions** tab and download the `paperOS-paperdiy-<commit>` artifact. It contains:
+Released versions are on the repository's [Releases page](https://github.com/daniebker/paperOS/releases). Each release has the files below, named `paperOS-<version>-paperdiy-<file>.bin`, plus `SHA256SUMS.txt` for checking the downloads.
+
+For an unreleased build, use GitHub Actions. It builds the firmware on every push to `main` and every pull request (`.github/workflows/build.yml`). Open the run on the repository's **Actions** tab and download the `paperOS-paperdiy-<commit>` artifact.
+
+Both contain:
 
 | File                          | Flash offset |
 |-------------------------------|--------------|
@@ -140,7 +144,7 @@ GitHub Actions builds the firmware on every push to `main` and every pull reques
 | `boot_app0.bin`               | `0xe000`     |
 | `firmware.bin`                | `0x10000`    |
 
-The simplest option is to flash the merged image with [esptool](https://docs.espressif.com/projects/esptool/en/latest/esp32s3/):
+The simplest option is to flash the merged image (`paperOS-<version>-paperdiy-merged.bin` in a release) with [esptool](https://docs.espressif.com/projects/esptool/en/latest/esp32s3/):
 
 ```bash
 esptool.py --chip esp32s3 --port /dev/ttyACM0 --baud 921600 write_flash 0x0 paperOS-paperdiy-merged.bin
@@ -153,6 +157,20 @@ esptool.py --chip esp32s3 --port /dev/ttyACM0 --baud 921600 write_flash 0x0 boot
 ```
 
 If you built locally, the images are in `.pio/build/paperdiy/`, and `boot_app0.bin` is in `~/.platformio/packages/framework-arduinoespressif32/tools/partitions/`.
+
+## Publishing a release
+
+Pushing a version tag runs `.github/workflows/release.yml`. It runs the tests, builds the firmware and publishes a GitHub release with the binaries, checksums and flashing notes:
+
+```bash
+git tag v0.1.0
+```
+
+```bash
+git push origin v0.1.0
+```
+
+Tags must look like `vMAJOR.MINOR.PATCH`. A tag with a suffix, such as `v0.2.0-beta.1`, is published as a pre-release. If the workflow is re-run for a tag that already has a release, the assets on that release are replaced.
 
 ## Running the tests
 

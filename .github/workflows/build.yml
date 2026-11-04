@@ -18,14 +18,14 @@ jobs:
     name: Unit tests (host)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
 
       - name: Cache PlatformIO
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ~/.platformio
           key: pio-native-${{ runner.os }}-${{ hashFiles('platformio.ini') }}
@@ -41,14 +41,14 @@ jobs:
     name: Build PaperDIY firmware
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
 
       - name: Cache PlatformIO
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: |
             ~/.platformio
@@ -83,8 +83,9 @@ jobs:
           ls -l "$out"
 
       - name: Upload firmware
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
-          name: paperOS-paperdiy-${{ github.sha }}
+          # On pull requests github.sha is the temporary merge commit; use the PR head instead.
+          name: paperOS-paperdiy-${{ github.event.pull_request.head.sha || github.sha }}
           path: dist/
           if-no-files-found: error

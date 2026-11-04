@@ -50,6 +50,7 @@ lib/paperos-core/         hardware-independent OS core
 apps/                     one folder per app
   hello-world-app/        sample app
 sdcard/                   example files to copy onto the SD card
+.github/workflows/        CI: unit tests and firmware build
 test/                     host unit tests for the core and apps
 ```
 
@@ -129,11 +130,29 @@ pio device monitor -e paperdiy
 
 ### Flashing a prebuilt binary without PlatformIO
 
-`pio run -e paperdiy` writes its images to `.pio/build/paperdiy/`. To flash them on another machine with [esptool](https://docs.espressif.com/projects/esptool/en/latest/esp32s3/), also copy `boot_app0.bin` from `~/.platformio/packages/framework-arduinoespressif32/tools/partitions/`. Then run:
+GitHub Actions builds the firmware on every push to `main` and every pull request (`.github/workflows/build.yml`). To download it, open the run on the repository's **Actions** tab and download the `paperOS-paperdiy-<commit>` artifact. It contains:
+
+| File                          | Flash offset |
+|-------------------------------|--------------|
+| `paperOS-paperdiy-merged.bin` | `0x0` (everything in one image) |
+| `bootloader.bin`              | `0x0`        |
+| `partitions.bin`              | `0x8000`     |
+| `boot_app0.bin`               | `0xe000`     |
+| `firmware.bin`                | `0x10000`    |
+
+The simplest option is to flash the merged image with [esptool](https://docs.espressif.com/projects/esptool/en/latest/esp32s3/):
+
+```bash
+esptool.py --chip esp32s3 --port /dev/ttyACM0 --baud 921600 write_flash 0x0 paperOS-paperdiy-merged.bin
+```
+
+Or flash the separate files:
 
 ```bash
 esptool.py --chip esp32s3 --port /dev/ttyACM0 --baud 921600 write_flash 0x0 bootloader.bin 0x8000 partitions.bin 0xe000 boot_app0.bin 0x10000 firmware.bin
 ```
+
+If you built locally, the images are in `.pio/build/paperdiy/`, and `boot_app0.bin` is in `~/.platformio/packages/framework-arduinoespressif32/tools/partitions/`.
 
 ## Running the tests
 

@@ -1,5 +1,7 @@
 #include "paperos/Shell.h"
 
+#include "paperos/AppMenu.h"
+
 namespace paperos {
 
 bool Shell::addApp(App* app) {
@@ -64,40 +66,7 @@ void Shell::draw(Display& display) {
 }
 
 void Shell::drawHome(Display& display) {
-  const int w = display.width();
-  const int h = display.height();
-  const int margin = 24;
-
-  // Header.
-  const int titleH = display.textHeight(TextSize::Title);
-  display.drawText("paperOS", margin, margin, TextSize::Title);
-  if (battery_ != nullptr) {
-    const int batteryY = margin + (titleH - display.textHeight(TextSize::Small)) / 2;
-    drawBatteryLevel(display, *battery_, w - margin, batteryY, TextAlign::Right);
-  }
-  const int headerBottom = margin * 2 + titleH;
-  display.fillRect(0, headerBottom - 4, w, 4, Color::Black);
-
-  // App list.
-  const int rowH = display.textHeight(TextSize::Large) + 24;
-  int y = headerBottom + margin;
-  if (appCount_ == 0) {
-    display.drawText("No apps installed", margin, y, TextSize::Large);
-  }
-  for (size_t i = 0; i < appCount_; ++i) {
-    const bool selected = i == selected_;
-    if (selected) display.fillRect(margin / 2, y, w - margin, rowH, Color::Black);
-    display.drawText(apps_[i]->name(), margin * 2, y + 12, TextSize::Large, TextAlign::Left,
-                     selected ? Color::White : Color::Black);
-    y += rowH + 8;
-  }
-
-  // Footer with the button legend.
-  const int footerH = display.textHeight(TextSize::Small);
-  const int footerY = h - margin - footerH;
-  display.drawLine(0, footerY - 12, w, footerY - 12, Color::DarkGray);
-  display.drawText("A / B: move    Hold A: open    Hold B: back", w / 2, footerY,
-                   TextSize::Small, TextAlign::Center, Color::DarkGray);
+  drawAppList(display, "paperOS", battery_, apps_, appCount_, selected_);
 }
 
 }  // namespace paperos

@@ -4,6 +4,8 @@
 #include <cstdint>
 #include <memory>
 #include <string>
+#include <utility>
+#include <vector>
 
 #include "paperos/Display.h"
 
@@ -25,6 +27,25 @@ class HttpResponse {
 
   // Body size from the headers, or negative if the server didn't say.
   virtual int64_t contentLength() const = 0;
+
+  // HTTP status code. get() only returns 200 responses; send() returns any.
+  virtual int status() const { return 200; }
+
+  // The value of the response header `name` (case-insensitive), or "" if the
+  // server didn't send it. Only ETag is kept.
+  virtual std::string header(const char* name) const {
+    (void)name;
+    return {};
+  }
+};
+
+// A request for Network::send(), for methods other than a plain GET, such as
+// WebDAV's PROPFIND.
+struct HttpRequest {
+  std::string method = "GET";
+  std::string url;
+  std::vector<std::pair<std::string, std::string>> headers;  // name, value
+  std::string body;
 };
 
 enum class NetworkState : uint8_t { Off, Connecting, Connected, Failed };
@@ -53,6 +74,17 @@ class Network {
   // URLs; https certificates are verified. Returns nullptr on failure, with a
   // short reason for the user in `error`.
   virtual std::unique_ptr<HttpResponse> get(const char* url, std::string& error) = 0;
+
+  // Sends `request` and waits for the response headers. Accepts http:// and
+  // https:// URLs; https certificates are verified. Redirects are not
+  // followed. Unlike get(), returns the response whatever its status code;
+  // check status(). Returns nullptr only when no response arrived, with a
+  // short reason for the user in `error`.
+  virtual std::unique_ptr<HttpResponse> send(const HttpRequest& request, std::string& error) {
+    (void)request;
+    error = "not supported";
+    return nullptr;
+  }
 };
 
 // Draws a Wi-Fi icon of three rising bars whose right edge is at `right` and

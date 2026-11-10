@@ -21,6 +21,8 @@
 #include <CalendarApp.h>
 #include <EReaderApp.h>
 #include <HelloWorldApp.h>
+#include <SyncApp.h>
+#include <TasksApp.h>
 
 namespace {
 
@@ -221,11 +223,17 @@ void setup() {
 
   static EReaderApp eReaderApp(sdFileSystem, m5Display, battery);
   static CalendarApp calendarApp(config, sdFileSystem, network, systemClock, m5Display, battery);
+  static TasksApp tasksApp(config, sdFileSystem, network, systemClock, m5Display, battery);
+  static SyncApp syncApp(config, network, systemClock, battery);
+  static paperos::AppMenu settingsMenu("Settings", &battery);
+  settingsMenu.addApp(&syncApp);
 
   shell.setBattery(&battery);
   shell.addApp(&helloWorldApp);
   shell.addApp(&eReaderApp);
   shell.addApp(&calendarApp);
+  shell.addApp(&tasksApp);
+  shell.addApp(&settingsMenu);
 
   shell.draw(*display);
   flushLog();

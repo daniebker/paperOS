@@ -292,6 +292,97 @@ void test_empty_shell_ignores_input() {
   TEST_ASSERT_TRUE(display.shows("No apps installed"));
 }
 
+// --- AppMenu ---------------------------------------------------------------
+
+void test_menu_lists_and_opens_its_apps() {
+  Shell shell;
+  FakeDisplay display;
+  CountingApp home("Home app"), sync("Sync"), other("Other");
+  AppMenu settings("Settings");
+  settings.addApp(&sync);
+  settings.addApp(&other);
+  shell.addApp(&home);
+  shell.addApp(&settings);
+
+  shell.draw(display);
+  TEST_ASSERT_TRUE(display.shows("Settings"));
+  TEST_ASSERT_FALSE(display.shows("Sync"));  // hidden inside the menu
+
+  shell.handle(InputEvent::Next);
+  shell.handle(InputEvent::Select);
+  TEST_ASSERT_TRUE(shell.activeApp() == &settings);
+  shell.draw(display);
+  TEST_ASSERT_TRUE(display.shows("Settings"));
+  TEST_ASSERT_TRUE(display.shows("Sync"));
+  TEST_ASSERT_TRUE(display.shows("Other"));
+  TEST_ASSERT_EQUAL_INT(0, sync.opened);
+
+  TEST_ASSERT_TRUE(shell.handle(InputEvent::Select));
+  TEST_ASSERT_TRUE(settings.activeApp() == &sync);
+  TEST_ASSERT_EQUAL_INT(1, sync.opened);
+  ASSERT_ENUM(Refresh::Quality, shell.nextRefresh());
+  shell.draw(display);
+  TEST_ASSERT_TRUE(display.shows("Sync"));
+  TEST_ASSERT_FALSE(display.shows("Other"));
+  ASSERT_ENUM(Refresh::Fast, shell.nextRefresh());
+
+  // Back from the app returns to the menu, then home.
+  TEST_ASSERT_TRUE(shell.handle(InputEvent::Back));
+  TEST_ASSERT_EQUAL_INT(1, sync.closed);
+  TEST_ASSERT_TRUE(shell.activeApp() == &settings);
+  TEST_ASSERT_TRUE(settings.activeApp() == nullptr);
+  ASSERT_ENUM(Refresh::Quality, shell.nextRefresh());
+  TEST_ASSERT_TRUE(shell.handle(InputEvent::Back));
+  TEST_ASSERT_TRUE(shell.activeApp() == nullptr);
+}
+
+void test_menu_selection_wraps_and_resets_on_open() {
+  AppMenu menu("Settings");
+  CountingApp a("One"), b("Two");
+  menu.addApp(&a);
+  menu.addApp(&b);
+  menu.onOpen();
+  TEST_ASSERT_TRUE(menu.onInput(InputEvent::Previous));
+  TEST_ASSERT_EQUAL_INT(1, menu.selectedIndex());
+  menu.onInput(InputEvent::Next);
+  TEST_ASSERT_EQUAL_INT(0, menu.selectedIndex());
+  menu.onInput(InputEvent::Next);
+  menu.onOpen();
+  TEST_ASSERT_EQUAL_INT(0, menu.selectedIndex());
+}
+
+void test_menu_forwards_ticks_and_closes_its_app() {
+  Shell shell;
+  WorkingApp working;
+  AppMenu menu("Settings");
+  menu.addApp(&working);
+  shell.addApp(&menu);
+  shell.handle(InputEvent::Select);
+  shell.tick();
+  TEST_ASSERT_EQUAL(0, working.ticks);  // not open yet
+  shell.handle(InputEvent::Select);
+  working.redraw = true;
+  TEST_ASSERT_TRUE(shell.tick());
+  TEST_ASSERT_EQUAL(1, working.ticks);
+  working.full = true;
+  FakeDisplay display;
+  shell.draw(display);
+  ASSERT_ENUM(Refresh::Quality, shell.nextRefresh());  // the app's own request
+}
+
+void test_menu_closes_its_app_before_sleep() {
+  Shell shell;
+  CountingApp sync("Sync");
+  AppMenu menu("Settings");
+  menu.addApp(&sync);
+  shell.addApp(&menu);
+  shell.handle(InputEvent::Select);
+  shell.handle(InputEvent::Select);
+  shell.closeApp();
+  TEST_ASSERT_EQUAL_INT(1, sync.closed);
+  TEST_ASSERT_TRUE(menu.activeApp() == nullptr);
+}
+
 // --- Config ----------------------------------------------------------------
 
 void test_config_reads_owner_name() {
@@ -823,6 +914,10 @@ int main(int, char**) {
   RUN_TEST(test_hello_world_app_flow);
   RUN_TEST(test_hello_world_app_without_owner_name);
   RUN_TEST(test_shell_ticks_only_the_open_app);
+  RUN_TEST(test_menu_lists_and_opens_its_apps);
+  RUN_TEST(test_menu_selection_wraps_and_resets_on_open);
+  RUN_TEST(test_menu_forwards_ticks_and_closes_its_app);
+  RUN_TEST(test_menu_closes_its_app_before_sleep);
   RUN_TEST(test_home_screen_shows_the_battery_level);
   RUN_TEST(test_app_can_request_a_quality_refresh);
   RUN_TEST(test_wifi_status_icon);

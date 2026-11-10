@@ -23,6 +23,8 @@ class EspNetwork : public paperos::Network {
   paperos::NetworkState state() override;
   std::string failureDetail() const override { return failureDetail_; }
   std::unique_ptr<paperos::HttpResponse> get(const char* url, std::string& error) override;
+  std::unique_ptr<paperos::HttpResponse> send(const paperos::HttpRequest& request,
+                                              std::string& error) override;
 
  private:
   std::string ssid_;

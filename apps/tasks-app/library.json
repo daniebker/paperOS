@@ -1,0 +1,8 @@
+{
+  "name": "tasks-app",
+  "version": "0.1.0",
+  "description": "paperOS tasks: shows Mindwtr's focus, next actions and upcoming tasks from data.json on the [sync] WebDAV server.",
+  "dependencies": { "paperos-core": "*" },
+  "frameworks": "*",
+  "platforms": "*"
+}

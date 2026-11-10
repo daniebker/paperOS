@@ -50,28 +50,44 @@ class EspHttpResponse : public paperos::HttpResponse {
   }
   ~EspHttpResponse() override { http_.end(); }
 
-  bool begin(const std::string& url, std::string& error) {
-    http_.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
-    http_.setRedirectLimit(5);
+  // Sends the request and waits for the response headers. With `onlyOk`,
+  // anything but 200 OK is an error; otherwise any status is accepted.
+  bool begin(const paperos::HttpRequest& request, bool onlyOk, std::string& error) {
+    // Only plain GETs follow redirects: following one could resend a request
+    // body, or credentials, somewhere unexpected.
+    if (request.method == "GET" && onlyOk) {
+      http_.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
+      http_.setRedirectLimit(5);
+    } else {
+      http_.setFollowRedirects(HTTPC_DISABLE_FOLLOW_REDIRECTS);
+    }
     // HTTP/1.0 keeps the body free of chunked encoding: it is the raw bytes
     // until the server closes the connection.
     http_.useHTTP10(true);
     http_.setConnectTimeout(kConnectTimeoutMs);
     http_.setTimeout(kHeaderTimeoutMs);
     http_.setUserAgent("paperOS");
-    if (!http_.begin(*client_, url.c_str())) {
+    if (!http_.begin(*client_, request.url.c_str())) {
       error = "bad url";
       return false;
     }
-    const int code = http_.GET();
+    for (const auto& header : request.headers) {
+      http_.addHeader(header.first.c_str(), header.second.c_str());
+    }
+    static const char* kKeptHeaders[] = {"ETag"};
+    http_.collectHeaders(kKeptHeaders, 1);
+    const int code = http_.sendRequest(
+        request.method.c_str(),
+        reinterpret_cast<uint8_t*>(const_cast<char*>(request.body.data())), request.body.size());
     if (code <= 0) {
       error = HTTPClient::errorToString(code).c_str();
-      M5_LOGW("GET failed: %s", error.c_str());
+      M5_LOGW("%s failed: %s", request.method.c_str(), error.c_str());
       return false;
     }
-    if (code != HTTP_CODE_OK) {
+    status_ = code;
+    if (onlyOk && code != HTTP_CODE_OK) {
       error = "HTTP " + std::to_string(code);
-      M5_LOGW("GET failed: %s", error.c_str());
+      M5_LOGW("%s failed: %s", request.method.c_str(), error.c_str());
       return false;
     }
     stream_ = http_.getStreamPtr();
@@ -99,6 +115,10 @@ class EspHttpResponse : public paperos::HttpResponse {
   }
 
   int64_t contentLength() const override { return total_; }
+  int status() const override { return status_; }
+  std::string header(const char* name) const override {
+    return const_cast<HTTPClient&>(http_).header(name).c_str();
+  }
 
  private:
   WiFiClientSecure secureClient_;
@@ -109,6 +129,7 @@ class EspHttpResponse : public paperos::HttpResponse {
   int64_t remaining_ = -1;  // bytes left, or -1 if the length is unknown
   int64_t total_ = -1;      // from the headers, or -1
   uint32_t lastDataMs_ = 0;
+  int status_ = 0;
 };
 
 }  // namespace
@@ -186,7 +207,32 @@ std::unique_ptr<paperos::HttpResponse> EspNetwork::get(const char* url, std::str
     error = "no Wi-Fi connection";
     return nullptr;
   }
+  paperos::HttpRequest request;
+  request.url = target;
   std::unique_ptr<EspHttpResponse> response(new EspHttpResponse(secure));
-  if (!response->begin(target, error)) return nullptr;
+  if (!response->begin(request, true, error)) return nullptr;
+  return std::unique_ptr<paperos::HttpResponse>(response.release());
+}
+
+std::unique_ptr<paperos::HttpResponse> EspNetwork::send(const paperos::HttpRequest& request,
+                                                        std::string& error) {
+  const bool secure = startsWith(request.url, "https://");
+  if (!secure && !startsWith(request.url, "http://")) {
+    error = "url must start with https://";
+    return nullptr;
+  }
+  if (state() != paperos::NetworkState::Connected) {
+    error = "no Wi-Fi connection";
+    return nullptr;
+  }
+  std::unique_ptr<EspHttpResponse> response(new EspHttpResponse(secure));
+  if (!response->begin(request, false, error)) return nullptr;
+  std::string ifMatch;
+  for (const auto& header : request.headers) {
+    if (strcasecmp(header.first.c_str(), "If-Match") == 0) ifMatch = header.second;
+  }
+  M5_LOGI("%s %s (%u bytes%s%s): HTTP %d, ETag %s", request.method.c_str(), request.url.c_str(),
+          unsigned(request.body.size()), ifMatch.empty() ? "" : ", If-Match ", ifMatch.c_str(),
+          response->status(), response->header("ETag").c_str());
   return std::unique_ptr<paperos::HttpResponse>(response.release());
 }

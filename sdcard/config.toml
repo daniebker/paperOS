@@ -38,6 +38,19 @@
 #   name = "Work"
 #   url = "webcal://outlook.office365.com/owa/calendar/.../calendar.ics"
 
+# A WebDAV or CalDAV folder to sync files with, such as a Nextcloud folder.
+# For Tasks, use the same folder, username and password as Mindwtr's WebDAV
+# sync. Open Settings > Sync to check the sign-in works. Use an https:// address.
+# [sync]
+#   url = "https://cloud.example.com/remote.php/dav/files/dan/mindwtr/"
+#   username = "dan"
+#   password = "app-password"
+
+# Tasks shows Mindwtr's data.json from the [sync] folder.
+[tasks]
+  days = 7              # how far ahead Upcoming looks
+  refresh_minutes = 15  # how often to download again while the app is open
+
 # Settings for working on paperOS.
 # [Developer]
 #   debug = "true"   # save log messages to /debug.0.log (then debug.1.log, ...) and

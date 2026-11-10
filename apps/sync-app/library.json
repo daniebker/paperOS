@@ -1,0 +1,8 @@
+{
+  "name": "sync-app",
+  "version": "0.1.0",
+  "description": "paperOS sync: checks the WebDAV / CalDAV server set in config.toml accepts your credentials.",
+  "dependencies": { "paperos-core": "*" },
+  "frameworks": "*",
+  "platforms": "*"
+}

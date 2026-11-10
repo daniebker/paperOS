@@ -1,7 +1,7 @@
 # paperOS
 A firmware for the PaperDIY by M5Stack.
 
-paperOS is a small app launcher for the PaperDIY's 4.7" e-paper display, shown in portrait (540x960) by default. It ships with an **E-Reader** for EPUB books, a **Calendar** that shows your upcoming events from iCal links, and a sample **Hello World** app, which greets you in five languages (press A / B to switch) and introduces the owner named in `config.toml`. Planned apps include a to-do list.
+paperOS is a small app launcher for the PaperDIY's 4.7" e-paper display, shown in portrait (540x960) by default. It ships with an **E-Reader** for EPUB books, a **Calendar** that shows your upcoming events from iCal links, **Tasks** from [Mindwtr](https://mindwtr.app), **Settings**, and a sample **Hello World** app, which greets you in five languages (press A / B to switch) and introduces the owner named in `config.toml`.
 
 ## Controls
 
@@ -96,6 +96,56 @@ Good to know:
 - https certificates are checked, so a calendar behind a proxy that intercepts TLS won't download.
 - Titles and locations are ASCII-only, like the E-Reader: `café` shows as `cafe`.
 
+## Tasks
+
+**Tasks** shows your [Mindwtr](https://mindwtr.app) tasks from the `data.json` that Mindwtr's WebDAV sync keeps in your sync folder. Set up [Sync](#sync) with the same folder, username and password as Mindwtr. The list has three parts:
+
+- **Today's Focus**: tasks you've focused for today, in Mindwtr's focus order.
+- **Next Actions**: next actions that have started, or have no start date. Ones with a due date come first, soonest first. Overdue ones say so.
+- **Upcoming**: inbox, next and waiting tasks that start or are due in the coming `days` (7 by default), soonest first.
+
+Each task shows its due or start date, project and contexts underneath. Done, archived, deleted, someday and reference tasks aren't shown.
+
+| Input        | List                   | Task menu            | Details             |
+|--------------|------------------------|----------------------|---------------------|
+| Press **A**  | Previous task          | Move selection up    | Previous page       |
+| Press **B**  | Next task              | Move selection down  | Next page           |
+| Hold **A**   | Open the task menu     | Choose selected item | –                   |
+| Hold **B**   | Back to home screen    | Back to the list     | Back to the menu    |
+
+The task menu has **Mark as done** and **View details**. The details screen shows everything about the task: status, project, dates, repeat, priority, time estimate, contexts, tags, location, checklist and notes.
+
+**Mark as done** downloads the latest `data.json`, changes only that task, and uploads it. Mindwtr picks the change up on its next sync. If Mindwtr changed the file at the same moment, paperOS notices, downloads it again and retries, so nothing made elsewhere is lost. The footer says when it's done, or why it couldn't save.
+
+When you open Tasks it shows the copy saved on the SD card straight away, then downloads a new one. It downloads again every `refresh_minutes` while open. With nothing on the list, hold A to download again.
+
+Good to know:
+
+- Repeating tasks can't be marked done on paperOS. Mindwtr creates the next one when you complete it, so do it there.
+- If you edit a task in Mindwtr after paperOS last downloaded it and before Mindwtr syncs, Mindwtr's version wins and the task isn't marked done.
+- Encrypted sync isn't supported: paperOS needs the plain `data.json`.
+- The saved copy is in `/.cache/tasks` on the SD card. It's safe to delete.
+- Sequential projects aren't taken into account, so all their next actions are listed.
+
+## Sync
+
+paperOS can sign in to a WebDAV server, such as Nextcloud. CalDAV servers are WebDAV underneath, so they work too. [Tasks](#tasks) reads Mindwtr's file from there. **Settings > Sync** checks that the server accepts your username and password. Add the server and the folder that holds your files to `config.toml`, along with your `[wifi]` network:
+
+```toml
+[sync]
+  url = "https://cloud.example.com/remote.php/dav/files/dan/mindwtr/"
+  username = "dan"
+  password = "app-password"
+```
+
+Open **Settings** from the home screen, then **Sync**. It joins Wi-Fi, signs in and shows **Signed in**, or what went wrong: wrong username or password, folder not found, or an address that isn't a WebDAV server. Wi-Fi is switched off again afterwards. Hold A to check again. Hold B goes back to Settings, and again to the home screen.
+
+Good to know:
+
+- The username and password are sent with HTTP basic authentication, so use an `https://` address. With two-factor sign-in, as on many Nextcloud accounts, create an app password for paperOS.
+- `url` is the folder, not a file. Redirects aren't followed, so use the address the server ends up at.
+- The password is kept in plain text on the SD card.
+
 ## Sleep
 
 After `sleep_minutes` without a button press (10 by default), or when you **double press the power button**, paperOS switches itself off to save the battery. The e-paper keeps its image without power, so it leaves a picture on the screen: a random one from the `wallpapers` folder on the SD card each time.
@@ -124,10 +174,14 @@ At boot, paperOS reads `config.toml` from the root of the SD card. There's an ex
 | `[owner] name` | Hello World | Shows "My name is <name>" under the greeting, in the selected language |
 | `[power] sleep_minutes` | All | Switch off after this many minutes without a button press, showing a wallpaper. `0` never sleeps. Default 10 |
 | `[time] timezone` | Calendar | Local time zone: a name such as `Europe/Berlin`, or a POSIX TZ rule such as `CET-1CEST,M3.5.0,M10.5.0/3`. Default `UTC` |
-| `[wifi] ssid`, `password` | Calendar | Wi-Fi network for downloading calendars and setting the clock |
+| `[wifi] ssid`, `password` | Calendar, Tasks, Settings > Sync | Wi-Fi network for downloading calendars, signing in to the sync server and setting the clock |
 | `[calendar] days` | Calendar | How many days ahead to show, 1 to 62. Default 14 |
 | `[calendar] refresh_minutes` | Calendar | How often to download again while open. `0` downloads only when you hold A. Default 60 |
 | `[[calendar.feed]] name`, `url` | Calendar | One block per calendar: its name, and its `https://`, `http://` or `webcal://` iCal address |
+| `[sync] url`, `username`, `password` | Tasks, Settings > Sync | WebDAV or CalDAV folder to sync files with, and the account to sign in with |
+| `[tasks] file` | Tasks | Mindwtr's file in the `[sync]` folder. Default `data.json` |
+| `[tasks] days` | Tasks | How many days ahead Upcoming looks, 0 to 62. Default 7 |
+| `[tasks] refresh_minutes` | Tasks | How often to download again while open. `0` only on opening. Default 15 |
 | `[Developer] debug` | All | `"true"` saves log messages to `debug.0.log` at the root of the SD card, moving on to `debug.1.log` and so on as each reaches 256 KB, and logs the power button. The Calendar also shows why Wi-Fi couldn't connect: the network, the driver's reason code, how long it tried and the device's MAC address. Default `"false"` |
 
 The file is only read at startup, so restart the device after changing it. If the card or file is missing, paperOS still starts and apps use their defaults.
@@ -145,9 +199,10 @@ src/                      firmware entry point and M5Stack hardware glue
   SdConfig.{h,cpp}        mounts the SD card and loads /config.toml
   SdFileSystem.{h,cpp}    paperos::FileSystem implemented with the SD library
   EspClock.{h,cpp}        paperos::Clock: system time, set over SNTP, saved to the RTC
-  EspNetwork.{h,cpp}      paperos::Network: Wi-Fi and HTTP(S) downloads
+  EspNetwork.{h,cpp}      paperos::Network: Wi-Fi and HTTP(S) requests
 lib/paperos-core/         hardware-independent OS core
   src/paperos/App.h       base class every app implements
+  src/paperos/AppMenu.*   a home-screen item that holds other apps, such as Settings
   src/paperos/AsciiFold.* Unicode to ASCII folding for the display fonts
   src/paperos/Battery.*   battery level interface and indicator
   src/paperos/Clock.h     wall-clock time interface
@@ -159,10 +214,13 @@ lib/paperos-core/         hardware-independent OS core
   src/paperos/Shell.*     home screen and app switching
   src/paperos/Sleep.*     idle timer and the sleep screen
   src/paperos/TimeZone.*  time zone names to POSIX TZ rules
+  src/paperos/WebDav.*    WebDAV / CalDAV client: sign-in check and file downloads
 apps/                     one folder per app
   calendar-app/           agenda from iCal links
   ereader-app/            EPUB reader
   hello-world-app/        sample app
+  sync-app/               checks the sign-in to the sync server
+  tasks-app/              Mindwtr tasks from data.json on the sync server
 sdcard/                   example files to copy onto the SD card
 .github/workflows/        CI: tests + firmware build, and releases on version tags
 test/                     host unit tests for the core and apps
@@ -310,6 +368,6 @@ To change the screen orientation, set `kDisplayRotation` in `src/main.cpp`: 0 is
    - Override `onInput()` to react to `Previous` / `Next` / `Select`. Return `true` when the screen should be redrawn.
    - Leave `Back` unhandled (return `false`) to let the shell exit the app. Handle it yourself only to go back within the app, for example from a book to the library.
 3. To read settings, take a `const paperos::Config&` in the constructor and call `config.getString("section", "key", "default")`. `HelloWorldApp` shows how.
-4. In `src/main.cpp`, include the app header, create a static instance and call `shell.addApp(&yourApp)` in `setup()`.
+4. In `src/main.cpp`, include the app header, create a static instance and call `shell.addApp(&yourApp)` in `setup()`. For a settings screen, call `settingsMenu.addApp(&yourApp)` instead, to list it under **Settings**.
 
 PlatformIO finds everything under `apps/` automatically (`lib_extra_dirs = apps`).

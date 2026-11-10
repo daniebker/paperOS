@@ -19,11 +19,13 @@ class FakeDisplay : public Display {
   int height() const override { return 960; }
   void beginFrame(Color) override {
     texts.clear();
+    filledRects = 0;
+    outlinedRects = 0;
     ++frames;
   }
   void endFrame(Refresh refresh) override { lastRefresh = refresh; }
-  void fillRect(int, int, int, int, Color) override {}
-  void drawRect(int, int, int, int, Color) override {}
+  void fillRect(int, int, int, int, Color) override { ++filledRects; }
+  void drawRect(int, int, int, int, Color) override { ++outlinedRects; }
   void drawLine(int, int, int, int, Color) override {}
   void drawText(const char* text, int, int, TextSize, TextAlign, Color) override {
     texts.emplace_back(text);
@@ -38,6 +40,8 @@ class FakeDisplay : public Display {
   }
 
   std::vector<std::string> texts;
+  int filledRects = 0;
+  int outlinedRects = 0;
   int frames = 0;
   Refresh lastRefresh = Refresh::Fast;
 };
@@ -406,6 +410,20 @@ void test_home_screen_shows_the_battery_level() {
   }
 }
 
+void test_wifi_status_icon() {
+  FakeDisplay display;
+  display.beginFrame(Color::White);
+  TEST_ASSERT_EQUAL_INT(0, drawWifiStatus(display, NetworkState::Off, 500, 0, 24));
+  TEST_ASSERT_EQUAL_INT(0, drawWifiStatus(display, NetworkState::Failed, 500, 0, 24));
+  TEST_ASSERT_EQUAL_INT(0, display.filledRects + display.outlinedRects);
+
+  const int width = drawWifiStatus(display, NetworkState::Connected, 500, 0, 24);
+  TEST_ASSERT_TRUE(width > 0);
+  TEST_ASSERT_EQUAL_INT(3, display.filledRects);
+  TEST_ASSERT_EQUAL_INT(width, drawWifiStatus(display, NetworkState::Connecting, 500, 0, 24));
+  TEST_ASSERT_EQUAL_INT(3, display.outlinedRects);
+}
+
 int main(int, char**) {
   UNITY_BEGIN();
   RUN_TEST(test_short_press_fires_on_release);
@@ -429,5 +447,6 @@ int main(int, char**) {
   RUN_TEST(test_shell_ticks_only_the_open_app);
   RUN_TEST(test_home_screen_shows_the_battery_level);
   RUN_TEST(test_app_can_request_a_quality_refresh);
+  RUN_TEST(test_wifi_status_icon);
   return UNITY_END();
 }

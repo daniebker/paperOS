@@ -243,16 +243,17 @@ bool CalendarApp::syncStep() {
     case Phase::Connecting: {
       const NetworkState state = network_.state();
       if (state == NetworkState::Connected) {
+        // Redraw so the header shows Wi-Fi as connected.
         clock_.sync();
         if (clock_.now() < 0) {
           phase_ = Phase::SyncingTime;
           phaseStartedMs_ = clock_.uptimeMs();
-          return false;
+          return true;
         }
         phase_ = Phase::Downloading;
         downloadIndex_ = 0;
         openNextDownload();
-        return phase_ != Phase::Downloading;
+        return true;
       }
       if (state == NetworkState::Failed || elapsed > kConnectTimeoutMs) {
         errors_.push_back("Could not connect to Wi-Fi");
@@ -584,6 +585,21 @@ std::string CalendarApp::statusText() const {
 
 // --- Drawing ---------------------------------------------------------------
 
+paperos::NetworkState CalendarApp::wifiState() const {
+  // Wi-Fi is only on while updating, and the phase follows it.
+  switch (phase_) {
+    case Phase::Connecting:
+      return NetworkState::Connecting;
+    case Phase::SyncingTime:
+    case Phase::Downloading:
+      return NetworkState::Connected;
+    case Phase::Loading:
+    case Phase::Idle:
+      break;
+  }
+  return NetworkState::Off;
+}
+
 void CalendarApp::draw(paperos::Display& display) {
   fullRefreshPending_ = false;
   const int w = display.width();
@@ -592,8 +608,13 @@ void CalendarApp::draw(paperos::Display& display) {
   // Header.
   const int titleH = display.textHeight(TextSize::Title);
   display.drawText("Calendar", kMargin, kMargin, TextSize::Title);
-  const int batteryY = kMargin + (titleH - display.textHeight(TextSize::Small)) / 2;
-  paperos::drawBatteryLevel(display, battery_, w - kMargin, batteryY, TextAlign::Right);
+  const int smallH = display.textHeight(TextSize::Small);
+  const int batteryY = kMargin + (titleH - smallH) / 2;
+  const int batteryW =
+      paperos::drawBatteryLevel(display, battery_, w - kMargin, batteryY, TextAlign::Right);
+  const int wifiH = smallH * 2 / 3;
+  paperos::drawWifiStatus(display, wifiState(), w - kMargin - batteryW - (batteryW > 0 ? 12 : 0),
+                          batteryY + (smallH - wifiH) / 2, wifiH);
   const int headerBottom = kMargin * 2 + titleH;
   display.fillRect(0, headerBottom - 4, w, 4, Color::Black);
 
@@ -615,7 +636,6 @@ void CalendarApp::draw(paperos::Display& display) {
   }
 
   // Footer: status and page on one line, then the button legend.
-  const int smallH = display.textHeight(TextSize::Small);
   const int legendY = h - kMargin - smallH;
   const int lineY = legendY - 12;
   const int statusY = lineY - 8 - smallH;

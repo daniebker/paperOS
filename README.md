@@ -82,7 +82,7 @@ Add a `[[calendar.feed]]` block for each calendar. Events are listed by day with
 | Hold **A**   | Download the calendars now   |
 | Hold **B**   | Back to home screen          |
 
-When you open the Calendar it shows the copy saved on the SD card straight away. It downloads again if that copy is older than `refresh_minutes`, and keeps doing so while it stays open. The footer shows when the calendars were last updated, or what went wrong. Wi-Fi is switched off again after each download.
+When you open the Calendar it shows the copy saved on the SD card straight away. It downloads again if that copy is older than `refresh_minutes`, and keeps doing so while it stays open. The footer shows when the calendars were last updated, or what went wrong. Wi-Fi is switched off again after each download. While it's on, three bars next to the battery level in the header show it: outlined while joining the network, filled once connected.
 
 The device has no clock of its own that survives a restart unless the board has a battery-backed RTC, so the first download also sets the time from the internet. If the date isn't known yet, the Calendar says so and gets it as soon as it can connect.
 

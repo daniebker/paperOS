@@ -5,6 +5,8 @@
 #include <memory>
 #include <string>
 
+#include "paperos/Display.h"
+
 namespace paperos {
 
 // The body of an HTTP response, read a piece at a time so apps can download
@@ -49,5 +51,12 @@ class Network {
   // short reason for the user in `error`.
   virtual std::unique_ptr<HttpResponse> get(const char* url, std::string& error) = 0;
 };
+
+// Draws a Wi-Fi icon of three rising bars whose right edge is at `right` and
+// top at `y`, `height` pixels tall: filled when connected, outlined while
+// connecting, and nothing when off or failed. Returns the width drawn, 0 if
+// nothing.
+int drawWifiStatus(Display& display, NetworkState state, int right, int y, int height,
+                   Color color = Color::DarkGray);
 
 }  // namespace paperos

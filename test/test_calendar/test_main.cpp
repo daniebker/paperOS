@@ -29,10 +29,14 @@ class FakeDisplay : public Display {
  public:
   int width() const override { return 540; }
   int height() const override { return 960; }
-  void beginFrame(Color) override { texts.clear(); }
+  void beginFrame(Color) override {
+    texts.clear();
+    filledRects = 0;
+    outlinedRects = 0;
+  }
   void endFrame(Refresh refresh) override { lastRefresh = refresh; }
-  void fillRect(int, int, int, int, Color) override {}
-  void drawRect(int, int, int, int, Color) override {}
+  void fillRect(int, int, int, int, Color) override { ++filledRects; }
+  void drawRect(int, int, int, int, Color) override { ++outlinedRects; }
   void drawLine(int, int, int, int, Color) override {}
   void drawText(const char* text, int, int, TextSize, TextAlign, Color) override {
     texts.emplace_back(text);
@@ -52,6 +56,8 @@ class FakeDisplay : public Display {
   }
 
   std::vector<std::string> texts;
+  int filledRects = 0;
+  int outlinedRects = 0;
   Refresh lastRefresh = Refresh::Fast;
 };
 
@@ -878,6 +884,28 @@ void test_app_shows_which_calendar_an_event_is_from() {
   TEST_ASSERT_TRUE(text.find("|Cafe with Anna|Main St. 4, Berlin - Home\n") != std::string::npos);
 }
 
+void test_header_shows_wifi_while_connected() {
+  AppFixture f(kOneFeed);
+  f.app.onOpen();
+  // Loads the (empty) cache, then starts connecting.
+  while (f.app.phase() == CalendarApp::Phase::Loading) f.app.tick();
+  TEST_ASSERT_TRUE(f.app.wifiState() == NetworkState::Connecting);
+  f.draw();
+  TEST_ASSERT_EQUAL_INT(3, f.display.outlinedRects);
+
+  // Joining the network asks for a redraw, which shows the bars filled.
+  bool redrawn = false;
+  while (f.app.phase() == CalendarApp::Phase::Connecting) redrawn = f.app.tick() || redrawn;
+  TEST_ASSERT_TRUE(redrawn);
+  TEST_ASSERT_TRUE(f.app.wifiState() == NetworkState::Connected);
+  f.draw();
+  TEST_ASSERT_EQUAL_INT(0, f.display.outlinedRects);
+
+  // Wi-Fi is off again after the download, and so is the icon.
+  f.runUntilIdle();
+  TEST_ASSERT_TRUE(f.app.wifiState() == NetworkState::Off);
+}
+
 void test_closing_mid_download_cleans_up() {
   AppFixture f(kOneFeed);
   f.app.onOpen();
@@ -924,6 +952,7 @@ int main(int, char**) {
   RUN_TEST(test_app_pages_through_a_busy_agenda);
   RUN_TEST(test_app_moves_on_at_midnight);
   RUN_TEST(test_app_shows_which_calendar_an_event_is_from);
+  RUN_TEST(test_header_shows_wifi_while_connected);
   RUN_TEST(test_closing_mid_download_cleans_up);
   return UNITY_END();
 }

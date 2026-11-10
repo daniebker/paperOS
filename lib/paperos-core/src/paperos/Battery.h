@@ -15,7 +15,8 @@ class Battery {
 };
 
 // Draws the charge as text such as "87%", or nothing if it can't be read.
-void drawBatteryLevel(Display& display, const Battery& battery, int x, int y, TextAlign align,
+// Returns the width drawn, 0 if nothing.
+int drawBatteryLevel(Display& display, const Battery& battery, int x, int y, TextAlign align,
                       Color color = Color::DarkGray);
 
 }  // namespace paperos

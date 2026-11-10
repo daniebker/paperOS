@@ -72,6 +72,8 @@ class CalendarApp : public paperos::App {
   const std::vector<Row>& pageRows(size_t page) const { return pages_[page]; }
   // Short note for the footer: when the agenda was updated, or what failed.
   std::string statusText() const;
+  // Wi-Fi state shown in the header.
+  paperos::NetworkState wifiState() const;
   // Unix time of the last download, or 0 if never.
   int64_t lastSync() const { return lastSync_; }
 

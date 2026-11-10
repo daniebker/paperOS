@@ -46,6 +46,14 @@ class Display {
   virtual int textHeight(TextSize size) const = 0;
   // Width in pixels of `text` at a given text size.
   virtual int textWidth(const char* text, TextSize size) const = 0;
+
+  // Draws an image file (JPEG, PNG or BMP) from storage, scaled to fill the
+  // whole screen and centred, cropping what overflows. Returns false if it
+  // can't be read or decoded, or the display can't show images.
+  virtual bool drawImage(const char* path) {
+    (void)path;
+    return false;
+  }
 };
 
 }  // namespace paperos

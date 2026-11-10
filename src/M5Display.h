@@ -6,7 +6,8 @@
 // paperos::Display backed by the PaperDIY e-paper panel via M5GFX.
 class M5Display : public paperos::Display {
  public:
-  explicit M5Display(M5GFX& gfx) : gfx_(gfx) {}
+  // `fs` is where drawImage() reads image headers from.
+  M5Display(M5GFX& gfx, paperos::FileSystem& fs) : gfx_(gfx), fs_(fs) {}
 
   int width() const override { return gfx_.width(); }
   int height() const override { return gfx_.height(); }
@@ -21,7 +22,9 @@ class M5Display : public paperos::Display {
                 paperos::Color color) override;
   int textHeight(paperos::TextSize size) const override;
   int textWidth(const char* text, paperos::TextSize size) const override;
+  bool drawImage(const char* path) override;
 
  private:
   M5GFX& gfx_;
+  paperos::FileSystem& fs_;
 };

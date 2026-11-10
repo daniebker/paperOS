@@ -9,3 +9,7 @@ constexpr const char* kConfigPath = "/config.toml";
 // kConfigPath into `config`. Returns false if the card or file is missing;
 // `config` is then left empty so apps fall back to defaults.
 bool loadConfigFromSd(paperos::Config& config);
+
+// Mounts the SD card again if it wasn't there at boot or was swapped since,
+// e.g. before reading wallpapers. Returns false if there is still no card.
+bool ensureSdMounted();

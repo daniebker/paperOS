@@ -36,4 +36,21 @@ class GestureDetector {
   bool longFired_ = false;
 };
 
+// Counts quick presses of a button in a row, from pressed/released samples:
+// update() returns 2 once a double press is over, 1 for a single press, and 0
+// otherwise. A series ends when the button stays up for kGapMs. A press held
+// longer than kMaxPressMs isn't counted, and ends the series.
+class PressCounter {
+ public:
+  static constexpr uint32_t kGapMs = 400;
+  static constexpr uint32_t kMaxPressMs = 800;
+
+  int update(bool pressed, uint32_t nowMs);
+
+ private:
+  bool pressed_ = false;
+  uint32_t changedAtMs_ = 0;
+  int count_ = 0;
+};
+
 }  // namespace paperos

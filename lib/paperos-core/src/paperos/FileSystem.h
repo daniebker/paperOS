@@ -23,7 +23,8 @@ class File {
 
 enum class FileMode : uint8_t {
   Read,
-  Write,  // creates the file, or truncates it if it exists
+  Write,   // creates the file, or truncates it if it exists
+  Append,  // creates the file, or writes at the end of it if it exists
 };
 
 struct DirEntry {

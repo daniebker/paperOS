@@ -35,4 +35,26 @@ Gesture GestureDetector::update(bool pressed, uint32_t nowMs) {
   return Gesture::None;
 }
 
+int PressCounter::update(bool pressed, uint32_t nowMs) {
+  const uint32_t held = nowMs - changedAtMs_;
+  if (pressed != pressed_) {
+    if (!pressed) {  // released
+      if (held <= kMaxPressMs) {
+        ++count_;
+      } else {
+        count_ = 0;  // a hold, not a press
+      }
+    }
+    pressed_ = pressed;
+    changedAtMs_ = nowMs;
+    return 0;
+  }
+  if (!pressed && count_ > 0 && held >= kGapMs) {
+    const int presses = count_;
+    count_ = 0;
+    return presses;
+  }
+  return 0;
+}
+
 }  // namespace paperos

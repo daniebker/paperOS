@@ -25,7 +25,10 @@ class SdFile : public paperos::File {
 }  // namespace
 
 std::unique_ptr<paperos::File> SdFileSystem::open(const char* path, paperos::FileMode mode) {
-  fs::File file = SD.open(path, mode == paperos::FileMode::Write ? FILE_WRITE : FILE_READ);
+  const char* sdMode = FILE_READ;
+  if (mode == paperos::FileMode::Write) sdMode = FILE_WRITE;
+  if (mode == paperos::FileMode::Append) sdMode = FILE_APPEND;
+  fs::File file = SD.open(path, sdMode);
   if (!file || file.isDirectory()) return nullptr;
   return std::unique_ptr<paperos::File>(new SdFile(file));
 }

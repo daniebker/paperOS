@@ -22,15 +22,21 @@
 //     name = "Personal"
 //     url = "https://calendar.example.com/basic.ics"
 //
-// Calendars are downloaded over Wi-Fi (see [wifi]) into /calendar on the SD
-// card, so the agenda still shows the last copy when offline. Opening the app
-// shows the cached copy at once and downloads again if it is older than
-// refresh_minutes.
+// Calendars are downloaded over Wi-Fi (see [wifi]) into /.cache/calendar on
+// the SD card, so the agenda still shows the last copy when offline. The
+// agenda built from them is cached there too, and served stale-while-
+// revalidate: opening the app shows the cached agenda at once, without
+// parsing the calendars, then downloads again in the background if the copy
+// is older than refresh_minutes and redraws with the new agenda. The cached
+// agenda is shown even when the time is unknown, as after a power cut on a
+// board without a battery-backed clock, until the time is set again.
 //
 // A / B turn pages, hold A downloads now and hold B returns home.
 class CalendarApp : public paperos::App {
  public:
-  static constexpr const char* kCacheDir = "/calendar";
+  static constexpr const char* kCacheRoot = "/.cache";
+  static constexpr const char* kCacheDir = "/.cache/calendar";
+  static constexpr const char* kAgendaCachePath = "/.cache/calendar/agenda.bin";
   static constexpr int kDefaultDays = 14;
   static constexpr int kDefaultRefreshMinutes = 60;
 
@@ -101,8 +107,13 @@ class CalendarApp : public paperos::App {
   void removeStaleCaches();
   void loadSyncTime();
   void saveSyncTime();
+  uint32_t agendaCacheKey() const;
+  bool loadCachedAgenda();
+  void saveCachedAgenda() const;
   void buildPages();
   std::vector<Row> buildRows() const;
+  // Local civil midnight of today, or kUnknownDay while the time is unknown.
+  int64_t today() const;
   int rowHeight(const Row& row) const;
   int bodyTop() const;
   int bodyBottom() const;
@@ -151,6 +162,8 @@ class CalendarApp : public paperos::App {
 
   std::vector<calendar::Occurrence> occurrences_;
   std::vector<std::vector<Row>> pages_;
+  static constexpr int64_t kUnknownDay = INT64_MIN;
+  int64_t pagesToday_ = kUnknownDay;  // today() when pages_ were built, for the labels
   size_t page_ = 0;
   bool fullRefreshPending_ = false;
 };

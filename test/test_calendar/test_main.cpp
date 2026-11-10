@@ -665,7 +665,7 @@ void test_agenda_keeps_events_that_started_before_the_window() {
 // --- The app ---------------------------------------------------------------
 
 void test_cache_path_is_stable() {
-  TEST_ASSERT_EQUAL_STRING("/calendar/131b39c8.ics",
+  TEST_ASSERT_EQUAL_STRING("/.cache/calendar/131b39c8.ics",
                            CalendarApp::cachePath("https://example.com/home.ics").c_str());
 }
 
@@ -679,7 +679,7 @@ void test_app_downloads_and_shows_the_agenda() {
   TEST_ASSERT_EQUAL_INT(1, f.network.disconnects);
   TEST_ASSERT_EQUAL_STRING(sampleCalendar().c_str(),
                            f.fs.files[CalendarApp::cachePath(kFeedUrl)].c_str());
-  TEST_ASSERT_EQUAL_STRING(std::to_string(kMonday8am).c_str(), f.fs.files["/calendar/synced"].c_str());
+  TEST_ASSERT_EQUAL_STRING(std::to_string(kMonday8am).c_str(), f.fs.files["/.cache/calendar/synced"].c_str());
   TEST_ASSERT_EQUAL_INT(6, (int)f.app.occurrences().size());
 
   TEST_ASSERT_EQUAL_STRING(
@@ -707,7 +707,7 @@ void test_app_downloads_and_shows_the_agenda() {
 void test_app_shows_the_cached_copy_without_downloading_when_fresh() {
   AppFixture f(kOneFeed);
   f.fs.files[CalendarApp::cachePath(kFeedUrl)] = sampleCalendar();
-  f.fs.files["/calendar/synced"] = std::to_string(kMonday8am - 10 * 60);
+  f.fs.files["/.cache/calendar/synced"] = std::to_string(kMonday8am - 10 * 60);
   f.app.onOpen();
   f.runUntilIdle();
   TEST_ASSERT_EQUAL_INT(0, f.network.connects);
@@ -720,7 +720,7 @@ void test_app_downloads_again_when_the_copy_is_stale() {
   AppFixture f("[calendar]\nrefresh_minutes = 30\n"
                "[[calendar.feed]]\nurl = \"https://example.com/home.ics\"\n");
   f.fs.files[CalendarApp::cachePath(kFeedUrl)] = sampleCalendar();
-  f.fs.files["/calendar/synced"] = std::to_string(kMonday8am - 31 * 60);
+  f.fs.files["/.cache/calendar/synced"] = std::to_string(kMonday8am - 31 * 60);
   f.app.onOpen();
   f.runUntilIdle();
   TEST_ASSERT_EQUAL_INT(1, (int)f.network.requests.size());
@@ -741,7 +741,7 @@ void test_failed_download_keeps_the_old_copy() {
   AppFixture f(kOneFeed);
   const std::string path = CalendarApp::cachePath(kFeedUrl);
   f.fs.files[path] = sampleCalendar();
-  f.fs.files["/calendar/synced"] = std::to_string(kMonday8am - 60);
+  f.fs.files["/.cache/calendar/synced"] = std::to_string(kMonday8am - 60);
   f.app.onOpen();
   f.runUntilIdle();
 
@@ -912,11 +912,11 @@ void test_app_shows_which_calendar_an_event_is_from() {
       "BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nSUMMARY:Review\r\n"
       "DTSTART:20261109T100000Z\r\nDTEND:20261109T110000Z\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n";
   // A copy from a feed that is no longer configured is cleaned up.
-  f.fs.files["/calendar/0badf00d.ics"] = "old";
+  f.fs.files["/.cache/calendar/0badf00d.ics"] = "old";
   f.app.onOpen();
   f.runUntilIdle();
   TEST_ASSERT_EQUAL_INT(2, (int)f.network.requests.size());
-  TEST_ASSERT_EQUAL_INT(0, (int)f.fs.files.count("/calendar/0badf00d.ics"));
+  TEST_ASSERT_EQUAL_INT(0, (int)f.fs.files.count("/.cache/calendar/0badf00d.ics"));
 
   const std::string text = f.allPagesText();
   TEST_ASSERT_TRUE(text.find("09:30 - 09:45|Standup|Home\n") != std::string::npos);
@@ -963,6 +963,148 @@ void test_closing_mid_download_cleans_up() {
   }
 }
 
+void test_app_caches_the_agenda() {
+  AppFixture f(kOneFeed);
+  f.app.onOpen();
+  f.runUntilIdle();
+  TEST_ASSERT_EQUAL_INT(1, (int)f.fs.files.count(CalendarApp::kAgendaCachePath));
+  TEST_ASSERT_EQUAL_INT(0, (int)f.fs.files.count(std::string(CalendarApp::kAgendaCachePath) + ".part"));
+  const std::string agenda = f.allPagesText();
+
+  // Opening again shows the cached agenda at once, without reading the
+  // calendar, and there is nothing to download yet.
+  f.fs.files.erase(CalendarApp::cachePath(kFeedUrl));
+  f.app.onClose();
+  f.app.onOpen();
+  TEST_ASSERT_TRUE(f.app.phase() == CalendarApp::Phase::Idle);
+  TEST_ASSERT_EQUAL_STRING(agenda.c_str(), f.allPagesText().c_str());
+  TEST_ASSERT_EQUAL_INT(1, (int)f.network.requests.size());
+}
+
+void test_app_shows_a_stale_agenda_while_downloading_a_new_one() {
+  AppFixture f(kOneFeed);
+  f.app.onOpen();
+  f.runUntilIdle();
+  f.app.onClose();
+
+  // An hour later the copy is stale, and the calendar has changed.
+  f.clock.time += 60 * 60;
+  f.network.bodies[kFeedUrl] =
+      "BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nSUMMARY:Lunch\r\n"
+      "DTSTART:20261109T110000Z\r\nDTEND:20261109T120000Z\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n";
+  f.app.onOpen();
+  TEST_ASSERT_TRUE(f.app.phase() == CalendarApp::Phase::Connecting);
+  TEST_ASSERT_EQUAL_INT(6, (int)f.app.occurrences().size());
+  f.draw();
+  TEST_ASSERT_TRUE(f.display.shows("Standup"));
+  TEST_ASSERT_TRUE(f.display.shows("Updating..."));
+
+  TEST_ASSERT_TRUE(f.runUntilIdle() > 0);
+  TEST_ASSERT_EQUAL_INT(2, (int)f.network.requests.size());
+  TEST_ASSERT_TRUE(f.app.wantsFullRefresh());
+  TEST_ASSERT_EQUAL_STRING("|Today, Mon 9 Nov|\n12:00 - 13:00|Lunch|\n", f.allPagesText().c_str());
+
+  // The cache now holds the new agenda.
+  f.app.onClose();
+  f.app.onOpen();
+  TEST_ASSERT_TRUE(f.app.phase() == CalendarApp::Phase::Idle);
+  TEST_ASSERT_EQUAL_STRING("|Today, Mon 9 Nov|\n12:00 - 13:00|Lunch|\n", f.allPagesText().c_str());
+}
+
+void test_app_ignores_a_cached_agenda_that_does_not_fit() {
+  AppFixture f(kOneFeed);
+  f.app.onOpen();
+  f.runUntilIdle();
+  f.app.onClose();
+  const std::string cached = f.fs.files[CalendarApp::kAgendaCachePath];
+
+  // From yesterday: built again from the calendar for today.
+  f.clock.time += 24 * 3600;
+  f.app.onOpen();
+  TEST_ASSERT_TRUE(f.app.phase() == CalendarApp::Phase::Loading);
+  f.runUntilIdle();
+  TEST_ASSERT_EQUAL_STRING("Today, Tue 10 Nov", f.app.pageRows(0)[0].text.c_str());
+  f.app.onClose();
+
+  // For other settings.
+  AppFixture other("[calendar]\n  days = 3\n[[calendar.feed]]\n  url = \"https://example.com/home.ics\"\n");
+  other.fs.files[CalendarApp::kAgendaCachePath] = cached;
+  other.fs.files[CalendarApp::cachePath(kFeedUrl)] = sampleCalendar();
+  other.fs.files["/.cache/calendar/synced"] = std::to_string(kMonday8am);
+  other.app.onOpen();
+  TEST_ASSERT_TRUE(other.app.phase() == CalendarApp::Phase::Loading);
+  other.app.onClose();
+
+  // Cut short, or not an agenda at all.
+  for (const std::string& junk : {cached.substr(0, cached.size() - 3), std::string("junk")}) {
+    AppFixture broken(kOneFeed);
+    broken.fs.files[CalendarApp::kAgendaCachePath] = junk;
+    broken.fs.files[CalendarApp::cachePath(kFeedUrl)] = sampleCalendar();
+    broken.fs.files["/.cache/calendar/synced"] = std::to_string(kMonday8am);
+    broken.app.onOpen();
+    TEST_ASSERT_TRUE(broken.app.phase() == CalendarApp::Phase::Loading);
+    broken.runUntilIdle();
+    TEST_ASSERT_EQUAL_INT(6, (int)broken.app.occurrences().size());
+    TEST_ASSERT_EQUAL_STRING(cached.c_str(), broken.fs.files[CalendarApp::kAgendaCachePath].c_str());
+  }
+}
+
+void test_app_shows_the_cached_agenda_before_the_time_is_known() {
+  AppFixture f(kOneFeed);
+  f.app.onOpen();
+  f.runUntilIdle();
+  f.app.onClose();
+
+  // After a power cut the clock is unknown until Wi-Fi sets it, an hour on.
+  f.clock.time = -1;
+  f.clock.syncTo = kMonday8am + 60 * 60;
+  f.app.onOpen();
+  TEST_ASSERT_TRUE(f.app.phase() == CalendarApp::Phase::Connecting);
+  TEST_ASSERT_EQUAL_STRING("Mon 9 Nov", f.app.pageRows(0)[0].text.c_str());
+  f.draw();
+  TEST_ASSERT_TRUE(f.display.shows("Standup"));
+  TEST_ASSERT_FALSE(f.display.shows("Date and time unknown"));
+
+  f.runUntilIdle();
+  TEST_ASSERT_EQUAL_INT(2, f.clock.syncs);  // one per download
+  TEST_ASSERT_EQUAL_STRING("Today, Mon 9 Nov", f.app.pageRows(0)[0].text.c_str());
+}
+
+void test_app_relabels_and_moves_on_once_the_time_is_known() {
+  AppFixture f(kOneFeed);
+  f.network.isConfigured = false;
+  f.app.onOpen();
+  f.runUntilIdle();  // nothing to show: no Wi-Fi to download with
+  f.fs.files[CalendarApp::cachePath(kFeedUrl)] = sampleCalendar();
+  f.app.onClose();
+  f.app.onOpen();
+  f.runUntilIdle();
+  f.app.onClose();
+
+  f.clock.time = -1;
+  f.app.onOpen();
+  TEST_ASSERT_TRUE(f.app.phase() == CalendarApp::Phase::Idle);
+  TEST_ASSERT_EQUAL_STRING("Mon 9 Nov", f.app.pageRows(0)[0].text.c_str());
+
+  // The same day: just the labels.
+  f.clock.time = kMonday8am;
+  f.clock.ms += 30 * 1000;
+  TEST_ASSERT_TRUE(f.app.tick());
+  TEST_ASSERT_TRUE(f.app.phase() == CalendarApp::Phase::Idle);
+  TEST_ASSERT_EQUAL_STRING("Today, Mon 9 Nov", f.app.pageRows(0)[0].text.c_str());
+
+  // A later day: built again for it.
+  f.app.onClose();
+  f.clock.time = -1;
+  f.app.onOpen();
+  f.clock.time = kMonday8am + 24 * 3600;
+  f.clock.ms += 30 * 1000;
+  f.app.tick();
+  TEST_ASSERT_TRUE(f.app.phase() == CalendarApp::Phase::Loading);
+  f.runUntilIdle();
+  TEST_ASSERT_EQUAL_STRING("Today, Tue 10 Nov", f.app.pageRows(0)[0].text.c_str());
+}
+
 int main(int, char**) {
   UNITY_BEGIN();
   RUN_TEST(test_civil_dates_round_trip);
@@ -995,5 +1137,10 @@ int main(int, char**) {
   RUN_TEST(test_app_shows_which_calendar_an_event_is_from);
   RUN_TEST(test_header_shows_wifi_while_connected);
   RUN_TEST(test_closing_mid_download_cleans_up);
+  RUN_TEST(test_app_caches_the_agenda);
+  RUN_TEST(test_app_shows_a_stale_agenda_while_downloading_a_new_one);
+  RUN_TEST(test_app_ignores_a_cached_agenda_that_does_not_fit);
+  RUN_TEST(test_app_shows_the_cached_agenda_before_the_time_is_known);
+  RUN_TEST(test_app_relabels_and_moves_on_once_the_time_is_known);
   return UNITY_END();
 }

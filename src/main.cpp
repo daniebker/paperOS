@@ -204,6 +204,17 @@ void setup() {
           M5.Power.M5pm1.readRegister8(kPm1WakeSource),
           M5.Power.M5pm1.readRegister8(kPm1ButtonConfig1),
           M5.Power.M5pm1.readRegister8(kPm1ButtonConfig2));
+  {
+    const int64_t now = systemClock.now();
+    char when[32] = "unknown";
+    if (now >= 0) {
+      const time_t seconds = time_t(now);
+      struct tm utc;
+      gmtime_r(&seconds, &utc);
+      strftime(when, sizeof(when), "%Y-%m-%d %H:%M:%S UTC", &utc);
+    }
+    M5_LOGI("RTC %s, time at boot %s", M5.Rtc.isEnabled() ? "found" : "not found", when);
+  }
   idleTimer.setTimeoutMinutes(config.getInt("power", "sleep_minutes", kDefaultSleepMinutes));
   idleTimer.reset(millis());
   M5_LOGI("Sleep after %u min without a button press", unsigned(idleTimer.timeoutMs() / 60000));

@@ -32,7 +32,12 @@ constexpr uint32_t kIdleCheckMs = 30 * 1000;
 constexpr uint32_t kConnectTimeoutMs = 30 * 1000;
 constexpr uint32_t kTimeSyncTimeoutMs = 20 * 1000;
 constexpr const char* kFeedTable = "calendar.feed";
-constexpr const char* kSyncTimeFile = "/calendar/synced";
+constexpr const char* kSyncTimeFile = "/.cache/calendar/synced";
+// Cached agenda file: magic, format version, then the fields below.
+constexpr char kAgendaMagic[4] = {'P', 'C', 'A', 'L'};
+constexpr uint8_t kAgendaVersion = 1;
+// Bigger than any agenda of kMaxOccurrences could be; anything larger is junk.
+constexpr uint32_t kMaxAgendaCacheBytes = 4 * 1024 * 1024;
 
 char chunk[2048];
 
@@ -84,6 +89,54 @@ bool looksLikeCalendar(const std::string& head) {
   return true;
 }
 
+uint32_t fnv1a(const std::string& text, uint32_t hash = 2166136261u) {
+  for (char c : text) hash = (hash ^ uint8_t(c)) * 16777619u;
+  return hash;
+}
+
+void putInt(std::string& out, uint64_t value, int bytes) {
+  for (int i = 0; i < bytes; ++i) out.push_back(char(uint8_t(value >> (8 * i))));
+}
+
+void putString(std::string& out, const std::string& text) {
+  putInt(out, text.size(), 4);
+  out += text;
+}
+
+// Reads what putInt() and putString() wrote. ok() turns false, and stays so,
+// on reading past the end.
+class CacheReader {
+ public:
+  explicit CacheReader(const std::string& data) : data_(data) {}
+  uint64_t getInt(int bytes) {
+    if (!ok_ || data_.size() - pos_ < size_t(bytes)) {
+      ok_ = false;
+      return 0;
+    }
+    uint64_t value = 0;
+    for (int i = 0; i < bytes; ++i) value |= uint64_t(uint8_t(data_[pos_ + i])) << (8 * i);
+    pos_ += size_t(bytes);
+    return value;
+  }
+  std::string getString() {
+    const uint64_t size = getInt(4);
+    if (!ok_ || data_.size() - pos_ < size) {
+      ok_ = false;
+      return {};
+    }
+    std::string text = data_.substr(pos_, size_t(size));
+    pos_ += size_t(size);
+    return text;
+  }
+  bool ok() const { return ok_; }
+  bool atEnd() const { return pos_ == data_.size(); }
+
+ private:
+  const std::string& data_;
+  size_t pos_ = 0;
+  bool ok_ = true;
+};
+
 }  // namespace
 
 CalendarApp::CalendarApp(const paperos::Config& config, paperos::FileSystem& fs,
@@ -97,8 +150,7 @@ CalendarApp::CalendarApp(const paperos::Config& config, paperos::FileSystem& fs,
       battery_(battery) {}
 
 std::string CalendarApp::cachePath(const std::string& url) {
-  uint32_t hash = 2166136261u;  // FNV-1a
-  for (char c : url) hash = (hash ^ uint8_t(c)) * 16777619u;
+  const uint32_t hash = fnv1a(url);
   char path[32];
   std::snprintf(path, sizeof(path), "%s/%08x.ics", kCacheDir, unsigned(hash));
   return path;
@@ -136,9 +188,18 @@ void CalendarApp::onOpen() {
   phase_ = Phase::Idle;
   lastCheckMs_ = clock_.uptimeMs();
 
-  fs_.makeDir(kCacheDir);  // fails harmlessly if it exists
+  // Both fail harmlessly if they exist.
+  fs_.makeDir(kCacheRoot);
+  fs_.makeDir(kCacheDir);
   loadSyncTime();
-  if (!startLoading() && shouldSync()) startSync();
+  // Stale-while-revalidate: show the cached agenda at once, then download in
+  // the background if it is due. Without a usable cached agenda, build one
+  // from the downloaded calendars first.
+  if (loadCachedAgenda()) {
+    if (shouldSync()) startSync();
+  } else if (!startLoading() && shouldSync()) {
+    startSync();
+  }
 }
 
 void CalendarApp::onClose() { stopWork(); }
@@ -213,6 +274,87 @@ void CalendarApp::finishLoading() {
   buildPages();
   if (page_ >= pages_.size()) page_ = pages_.empty() ? 0 : pages_.size() - 1;
   fullRefreshPending_ = true;
+  saveCachedAgenda();
+}
+
+// --- The cached agenda -----------------------------------------------------
+
+// Changes whenever something other than the calendar files changes what the
+// agenda holds, so a cached agenda from another setup is not shown.
+uint32_t CalendarApp::agendaCacheKey() const {
+  std::string key = std::to_string(days_) + "\n" + config_.getString("time", "timezone", "UTC");
+  for (const Feed& feed : feeds_) key += "\n" + feed.url;
+  return fnv1a(key);
+}
+
+bool CalendarApp::loadCachedAgenda() {
+  if (feeds_.empty()) return false;
+  std::unique_ptr<paperos::File> file = fs_.open(kAgendaCachePath, FileMode::Read);
+  if (!file || file->size() > kMaxAgendaCacheBytes) return false;
+  std::string data(file->size(), '\0');
+  if (file->read(&data[0], data.size()) != data.size()) return false;
+  file.reset();
+
+  CacheReader in(data);
+  for (char c : kAgendaMagic) {
+    if (in.getInt(1) != uint8_t(c)) return false;
+  }
+  if (in.getInt(1) != kAgendaVersion || in.getInt(4) != agendaCacheKey()) return false;
+  // Only today's agenda: on a new day, build it again from the calendars.
+  // While the time is unknown, show it anyway; tick() builds it again if it
+  // turns out to be from another day once the time is set.
+  const int64_t windowStart = int64_t(in.getInt(8));
+  if (today() != kUnknownDay && windowStart != today()) return false;
+  const uint64_t count = in.getInt(4);
+  if (!in.ok() || count > AgendaBuilder::kMaxOccurrences) return false;
+
+  std::vector<Occurrence> occurrences(static_cast<size_t>(count));
+  for (Occurrence& o : occurrences) {
+    o.start = int64_t(in.getInt(8));
+    o.end = int64_t(in.getInt(8));
+    o.allDay = in.getInt(1) != 0;
+    o.calendar = uint8_t(in.getInt(1));
+    o.summary = in.getString();
+    o.location = in.getString();
+    if (o.calendar >= feeds_.size()) return false;
+  }
+  if (!in.ok() || !in.atEnd()) return false;
+
+  occurrences_ = std::move(occurrences);
+  windowStart_ = windowStart;
+  loaded_ = true;
+  buildPages();
+  if (page_ >= pages_.size()) page_ = pages_.empty() ? 0 : pages_.size() - 1;
+  return true;
+}
+
+void CalendarApp::saveCachedAgenda() const {
+  std::string data(kAgendaMagic, sizeof(kAgendaMagic));
+  putInt(data, kAgendaVersion, 1);
+  putInt(data, agendaCacheKey(), 4);
+  putInt(data, uint64_t(windowStart_), 8);
+  putInt(data, occurrences_.size(), 4);
+  for (const Occurrence& o : occurrences_) {
+    putInt(data, uint64_t(o.start), 8);
+    putInt(data, uint64_t(o.end), 8);
+    putInt(data, o.allDay ? 1 : 0, 1);
+    putInt(data, o.calendar, 1);
+    putString(data, o.summary);
+    putString(data, o.location);
+  }
+
+  // Like a download, only replace the old copy once the new one is complete.
+  const std::string part = std::string(kAgendaCachePath) + ".part";
+  std::unique_ptr<paperos::File> file = fs_.open(part.c_str(), FileMode::Write);
+  if (!file) return;
+  const bool written = file->write(data.data(), data.size()) == data.size();
+  file.reset();
+  if (written) {
+    fs_.remove(kAgendaCachePath);
+    if (fs_.rename(part.c_str(), kAgendaCachePath)) return;
+  }
+  fs_.remove(part.c_str());
+  fs_.remove(kAgendaCachePath);  // never leave a cached agenda that may be out of date
 }
 
 // --- Downloading -----------------------------------------------------------
@@ -429,9 +571,13 @@ bool CalendarApp::tick() {
     return true;
   }
   // Move on at midnight, or load once the time becomes known.
-  const int64_t time = clock_.now();
-  if (time >= 0 && (!loaded_ || midnightOf(calendar::utcToLocal(time)) != windowStart_)) {
+  const int64_t day = today();
+  if (day == kUnknownDay) return false;
+  if (!loaded_ || day != windowStart_) {
     startLoading();
+  } else if (pagesToday_ != day) {  // add "Today" now that it is known
+    buildPages();
+    return true;
   }
   return false;
 }
@@ -460,6 +606,11 @@ bool CalendarApp::onInput(InputEvent event) {
 }
 
 // --- Layout ----------------------------------------------------------------
+
+int64_t CalendarApp::today() const {
+  const int64_t now = clock_.now();
+  return now < 0 ? kUnknownDay : midnightOf(calendar::utcToLocal(now));
+}
 
 std::vector<CalendarApp::Row> CalendarApp::buildRows() const {
   std::vector<Row> rows;
@@ -495,8 +646,10 @@ std::vector<CalendarApp::Row> CalendarApp::buildRows() const {
     Row day;
     day.kind = Row::Kind::Day;
     day.text = dateText(dayStart);
-    if (d == 0) day.text = "Today, " + day.text;
-    if (d == 1) day.text = "Tomorrow, " + day.text;
+    if (pagesToday_ != kUnknownDay && dayStart == pagesToday_) day.text = "Today, " + day.text;
+    if (pagesToday_ != kUnknownDay && dayStart == pagesToday_ + kSecondsPerDay) {
+      day.text = "Tomorrow, " + day.text;
+    }
     rows.push_back(day);
     if (events.empty()) {
       Row empty;
@@ -577,6 +730,7 @@ void CalendarApp::setWifiDetail(std::string detail) {
 
 void CalendarApp::buildPages() {
   pages_.clear();
+  pagesToday_ = today();
   const std::vector<Row> rows = buildRows();
   const int top = bodyTop();
   const int bottom = bodyBottom();

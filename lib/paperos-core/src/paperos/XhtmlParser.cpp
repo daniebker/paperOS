@@ -1,11 +1,11 @@
-#include "XhtmlParser.h"
+#include "paperos/XhtmlParser.h"
 
 #include <cstdlib>
 #include <cstring>
 
-#include <paperos/AsciiFold.h>
+#include "paperos/AsciiFold.h"
 
-namespace ereader {
+namespace paperos {
 
 namespace {
 
@@ -258,4 +258,4 @@ std::string xmlTextToAscii(const std::string& xml) {
   return sink.text;
 }
 
-}  // namespace ereader
+}  // namespace paperos

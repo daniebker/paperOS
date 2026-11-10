@@ -6,7 +6,7 @@
 
 #include <paperos.h>
 
-#include "XhtmlParser.h"
+#include <paperos/XhtmlParser.h>
 
 namespace ereader {
 
@@ -36,7 +36,7 @@ struct PageMetrics {
 };
 
 // Word-wraps a stream of text into pages. `onPage` receives each finished page.
-class PageLayout : public TextSink {
+class PageLayout : public paperos::TextSink {
  public:
   using PageCallback = std::function<void(const std::string& page)>;
 
@@ -75,6 +75,6 @@ class PageLayout : public TextSink {
 
 // Feeds a page in the format above back into `sink`, without its line wrapping,
 // so it can be laid out again with other metrics.
-void feedLaidOutPage(const std::string& page, TextSink& sink);
+void feedLaidOutPage(const std::string& page, paperos::TextSink& sink);
 
 }  // namespace ereader

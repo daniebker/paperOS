@@ -1,7 +1,7 @@
 # paperOS
 A firmware for the PaperDIY by M5Stack.
 
-paperOS is a small app launcher for the PaperDIY's 4.7" e-paper display, shown in portrait (540x960) by default. It ships with an **E-Reader** for EPUB books, a **Calendar** that shows your upcoming events from iCal links, **Tasks** from [Mindwtr](https://mindwtr.app), **Settings**, and a sample **Hello World** app, which greets you in five languages (press A / B to switch) and introduces the owner named in `config.toml`.
+paperOS is a small app launcher for the PaperDIY's 4.7" e-paper display, shown in portrait (540x960) by default. It ships with an **E-Reader** for EPUB books, a **Calendar** that shows your upcoming events from iCal links, **Tasks** from [Mindwtr](https://mindwtr.app), an **RSS** reader, **Settings**, and a sample **Hello World** app, which greets you in five languages (press A / B to switch) and introduces the owner named in `config.toml`.
 
 ## Controls
 
@@ -127,6 +127,40 @@ Good to know:
 - The saved copy is in `/.cache/tasks` on the SD card. It's safe to delete.
 - Sequential projects aren't taken into account, so all their next actions are listed.
 
+## RSS
+
+The RSS reader shows articles from RSS and Atom feeds, newest first, with every feed in one list. It downloads them over Wi-Fi, so add your network and feeds to `config.toml`:
+
+```toml
+[[rss.feed]]
+  url = "https://example.com/feed.xml"
+
+[[rss.feed]]
+  name = "Blog"
+  url = "https://blog.example.com/atom.xml"
+```
+
+Add a `[[rss.feed]]` block for each feed. `name` is optional; without it, the feed's own title is used.
+
+| Input        | List                       | Article             |
+|--------------|----------------------------|---------------------|
+| Press **A**  | Previous article           | Previous page       |
+| Press **B**  | Next article               | Next page           |
+| Hold **A**   | Read the selected article  | –                   |
+| Hold **B**   | Back to home screen        | Back to the list    |
+
+Each article shows its feed and when it was published. A square marks unread ones, and the header counts them. Opening an article marks it read. The article shows its title, feed and date, then the text, laid out in pages.
+
+Like the Calendar, it shows the list saved on the SD card straight away when you open it, even if it's out of date. If that copy is older than `refresh_minutes`, it downloads the feeds again in the background and redraws with the new articles. It keeps doing so while it stays open. The footer shows when the feeds were last updated, or what went wrong. With nothing to read, hold A to download now.
+
+Good to know:
+
+- The feeds, the list built from them, the article text and which articles you've read are saved in `/.cache/rss` on the SD card. It's safe to delete; the feeds are downloaded again, but every article shows as unread.
+- Each feed keeps its newest `articles` (20 by default). The text of each article is cut at about 16,000 characters.
+- Articles show the text the feed includes. Many feeds carry only a summary; the full article stays on the website.
+- Text only: images, videos and embedded content are skipped, and text is ASCII-only, like the E-Reader.
+- If a download fails, or a url gives a web page instead of a feed, the last copy of that feed is kept.
+
 ## Sync
 
 paperOS can sign in to a WebDAV server, such as Nextcloud. CalDAV servers are WebDAV underneath, so they work too. [Tasks](#tasks) reads Mindwtr's file from there. **Settings > Sync** checks that the server accepts your username and password. Add the server and the folder that holds your files to `config.toml`, along with your `[wifi]` network:
@@ -174,11 +208,14 @@ At boot, paperOS reads `config.toml` from the root of the SD card. There's an ex
 | `[owner] name` | Hello World | Shows "My name is <name>" under the greeting, in the selected language |
 | `[power] sleep_minutes` | All | Switch off after this many minutes without a button press, showing a wallpaper. `0` never sleeps. Default 10 |
 | `[time] timezone` | Calendar | Local time zone: a name such as `Europe/Berlin`, or a POSIX TZ rule such as `CET-1CEST,M3.5.0,M10.5.0/3`. Default `UTC` |
-| `[wifi] ssid`, `password` | Calendar, Tasks, Settings > Sync | Wi-Fi network for downloading calendars, signing in to the sync server and setting the clock |
+| `[wifi] ssid`, `password` | Calendar, RSS, Tasks, Settings > Sync | Wi-Fi network for downloading calendars, signing in to the sync server and setting the clock |
 | `[calendar] days` | Calendar | How many days ahead to show, 1 to 62. Default 14 |
 | `[calendar] refresh_minutes` | Calendar | How often to download again while open. `0` downloads only when you hold A. Default 60 |
 | `[[calendar.feed]] name`, `url` | Calendar | One block per calendar: its name, and its `https://`, `http://` or `webcal://` iCal address |
 | `[sync] url`, `username`, `password` | Tasks, Settings > Sync | WebDAV or CalDAV folder to sync files with, and the account to sign in with |
+| `[rss] refresh_minutes` | RSS | How often to download again while open. `0` downloads only when there's nothing to read and you hold A. Default 60 |
+| `[rss] articles` | RSS | How many articles to keep from each feed, 1 to 100. Default 20 |
+| `[[rss.feed]] name`, `url` | RSS | One block per feed: an optional name, and its `https://` or `http://` address |
 | `[tasks] file` | Tasks | Mindwtr's file in the `[sync]` folder. Default `data.json` |
 | `[tasks] days` | Tasks | How many days ahead Upcoming looks, 0 to 62. Default 7 |
 | `[tasks] refresh_minutes` | Tasks | How often to download again while open. `0` only on opening. Default 15 |
@@ -215,10 +252,12 @@ lib/paperos-core/         hardware-independent OS core
   src/paperos/Sleep.*     idle timer and the sleep screen
   src/paperos/TimeZone.*  time zone names to POSIX TZ rules
   src/paperos/WebDav.*    WebDAV / CalDAV client: sign-in check and file downloads
+  src/paperos/XhtmlParser.*  streaming HTML/XHTML to plain text
 apps/                     one folder per app
   calendar-app/           agenda from iCal links
   ereader-app/            EPUB reader
   hello-world-app/        sample app
+  rss-app/                RSS and Atom reader
   sync-app/               checks the sign-in to the sync server
   tasks-app/              Mindwtr tasks from data.json on the sync server
 sdcard/                   example files to copy onto the SD card

@@ -113,7 +113,7 @@ void PageLayout::finishPage() {
   usedHeight_ = 0;
 }
 
-void feedLaidOutPage(const std::string& page, TextSink& sink) {
+void feedLaidOutPage(const std::string& page, paperos::TextSink& sink) {
   bool heading = false;
   size_t start = 0;
   while (start < page.size()) {

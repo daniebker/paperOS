@@ -142,7 +142,7 @@ void BookIndexer::writePage(const std::string& page) {
 BookIndexer::Status BookIndexer::step() {
   if (nextChapter_ >= epub_.chapterCount()) return finish();
 
-  XhtmlParser parser(*layout_);
+  paperos::XhtmlParser parser(*layout_);
   const bool ok = epub_.readChapter(nextChapter_, [&](const uint8_t* data, size_t size) {
     parser.feed(reinterpret_cast<const char*>(data), size);
     return !writeFailed_;

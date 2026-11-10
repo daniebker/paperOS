@@ -1,0 +1,8 @@
+{
+  "name": "calendar-app",
+  "version": "0.1.0",
+  "description": "paperOS calendar: shows upcoming events from iCal (.ics) links set in config.toml.",
+  "dependencies": { "paperos-core": "*" },
+  "frameworks": "*",
+  "platforms": "*"
+}

@@ -24,6 +24,7 @@ const lgfx::IFont* fontFor(TextSize size) {
     case TextSize::Medium: return &fonts::FreeSans18pt7b;
     case TextSize::Large: return &fonts::FreeSansBold18pt7b;
     case TextSize::Title: return &fonts::FreeSansBold24pt7b;
+    case TextSize::ExtraLarge: return &fonts::FreeSans24pt7b;
   }
   return &fonts::FreeSans12pt7b;
 }
@@ -67,3 +68,7 @@ void M5Display::drawText(const char* text, int x, int y, TextSize size, TextAlig
 }
 
 int M5Display::textHeight(TextSize size) const { return gfx_.fontHeight(fontFor(size)); }
+
+int M5Display::textWidth(const char* text, TextSize size) const {
+  return gfx_.textWidth(text, fontFor(size));
+}

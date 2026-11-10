@@ -20,6 +20,7 @@ class M5Display : public paperos::Display {
   void drawText(const char* text, int x, int y, paperos::TextSize size, paperos::TextAlign align,
                 paperos::Color color) override;
   int textHeight(paperos::TextSize size) const override;
+  int textWidth(const char* text, paperos::TextSize size) const override;
 
  private:
   M5GFX& gfx_;

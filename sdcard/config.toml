@@ -3,3 +3,35 @@
 
 [owner]
   name = "Dan"
+
+# Used for the calendar and the clock. A name such as "Europe/Berlin" or
+# "America/New_York", or a POSIX TZ rule such as "CET-1CEST,M3.5.0,M10.5.0/3".
+[time]
+  timezone = "UTC"
+
+# The Wi-Fi network used to download calendars and set the clock.
+# [wifi]
+#   ssid = "MyNetwork"
+#   password = "secret"
+
+[calendar]
+  days = 14             # how many days ahead to show
+  refresh_minutes = 60  # how often to download again while the app is open
+
+# One [[calendar.feed]] per calendar, using its secret iCal (.ics) address.
+# This example is a public holiday calendar, so it works once [wifi] is set.
+[[calendar.feed]]
+  name = "Holidays"
+  url = "https://calendar.google.com/calendar/ical/en.uk%23holiday%40group.v.calendar.google.com/public/basic.ics"
+
+# [[calendar.feed]]
+#   name = "Personal"
+#   url = "https://calendar.google.com/calendar/ical/.../basic.ics"
+#
+# [[calendar.feed]]
+#   name = "Work"
+#   url = "webcal://outlook.office365.com/owa/calendar/.../calendar.ics"
+
+# Settings for working on paperOS.
+# [Developer]
+#   debug = "true"   # show technical detail when something fails, such as why Wi-Fi didn't connect

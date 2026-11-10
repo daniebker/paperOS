@@ -1,0 +1,8 @@
+{
+  "name": "ereader-app",
+  "version": "0.1.0",
+  "description": "paperOS e-reader: reads EPUB books from /books on the SD card and remembers your place.",
+  "dependencies": { "paperos-core": "*" },
+  "frameworks": "*",
+  "platforms": "*"
+}

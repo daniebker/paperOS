@@ -4,6 +4,7 @@
 #include <paperos.h>
 #include <HelloWorldApp.h>
 
+#include <cstring>
 #include <string>
 #include <vector>
 
@@ -18,16 +19,19 @@ class FakeDisplay : public Display {
   int height() const override { return 960; }
   void beginFrame(Color) override {
     texts.clear();
+    filledRects = 0;
+    outlinedRects = 0;
     ++frames;
   }
   void endFrame(Refresh refresh) override { lastRefresh = refresh; }
-  void fillRect(int, int, int, int, Color) override {}
-  void drawRect(int, int, int, int, Color) override {}
+  void fillRect(int, int, int, int, Color) override { ++filledRects; }
+  void drawRect(int, int, int, int, Color) override { ++outlinedRects; }
   void drawLine(int, int, int, int, Color) override {}
   void drawText(const char* text, int, int, TextSize, TextAlign, Color) override {
     texts.emplace_back(text);
   }
   int textHeight(TextSize) const override { return 30; }
+  int textWidth(const char* text, TextSize) const override { return 10 * int(strlen(text)); }
 
   bool shows(const char* text) const {
     for (const auto& t : texts)
@@ -36,6 +40,8 @@ class FakeDisplay : public Display {
   }
 
   std::vector<std::string> texts;
+  int filledRects = 0;
+  int outlinedRects = 0;
   int frames = 0;
   Refresh lastRefresh = Refresh::Fast;
 };
@@ -50,6 +56,26 @@ class CountingApp : public App {
   const char* name_;
   int opened = 0;
   int closed = 0;
+};
+
+class FakeBattery : public Battery {
+ public:
+  int level() const override { return charge; }
+  int charge = 87;
+};
+
+class WorkingApp : public App {
+ public:
+  const char* name() const override { return "Working"; }
+  bool tick() override {
+    ++ticks;
+    return redraw;
+  }
+  bool wantsFullRefresh() const override { return full; }
+  void draw(Display&) override {}
+  int ticks = 0;
+  bool redraw = false;
+  bool full = false;
 };
 
 #define ASSERT_ENUM(expected, actual) TEST_ASSERT_EQUAL_INT((int)(expected), (int)(actual))
@@ -214,6 +240,62 @@ void test_config_last_definition_wins_and_parse_resets() {
   TEST_ASSERT_FALSE(c.has("owner", "name"));
 }
 
+void test_config_array_tables() {
+  Config c;
+  const char* text =
+      "[calendar]\n"
+      "  days = 7\n"
+      "[[calendar.feed]]\n"
+      "  name = \"Home\"\n"
+      "  url = \"https://a.example/home.ics\"\n"
+      "[[ calendar . feed ]]  # second\n"
+      "  url = \"webcal://b.example/work.ics\"\n"
+      "[owner]\n"
+      "  name = \"Dan\"\n";
+  TEST_ASSERT_TRUE(c.parse(text));
+  TEST_ASSERT_EQUAL_INT(2, (int)c.tableCount("calendar.feed"));
+  TEST_ASSERT_EQUAL_INT(0, (int)c.tableCount("calendar"));
+  TEST_ASSERT_EQUAL_STRING("Home", c.getTableString("calendar.feed", 0, "name"));
+  TEST_ASSERT_EQUAL_STRING("https://a.example/home.ics", c.getTableString("calendar.feed", 0, "url"));
+  TEST_ASSERT_EQUAL_STRING("webcal://b.example/work.ics",
+                           c.getTableString("calendar.feed", 1, "url"));
+  TEST_ASSERT_EQUAL_STRING("none", c.getTableString("calendar.feed", 1, "name", "none"));
+  TEST_ASSERT_EQUAL_STRING("none", c.getTableString("calendar.feed", 2, "url", "none"));
+  // Table keys don't leak into a [section] of the same name, and back.
+  TEST_ASSERT_FALSE(c.has("calendar.feed", "url"));
+  TEST_ASSERT_EQUAL_STRING("", c.getTableString("calendar", 0, "days"));
+  TEST_ASSERT_EQUAL_STRING("Dan", c.getString("owner", "name"));
+
+  TEST_ASSERT_FALSE(c.parse("[[feed]\n[feed]]\n[[]]\n"));
+  TEST_ASSERT_EQUAL_INT(3, c.errorCount());
+  TEST_ASSERT_EQUAL_INT(0, (int)c.tableCount("feed"));
+}
+
+void test_config_reads_whole_numbers() {
+  Config c;
+  c.parse("[calendar]\ndays = 21\nneg = -3\nbad = 2.5\nword = \"7\"\nempty = \"\"\n");
+  TEST_ASSERT_EQUAL_INT(21, (int)c.getInt("calendar", "days", 14));
+  TEST_ASSERT_EQUAL_INT(-3, (int)c.getInt("calendar", "neg", 0));
+  TEST_ASSERT_EQUAL_INT(14, (int)c.getInt("calendar", "bad", 14));
+  TEST_ASSERT_EQUAL_INT(7, (int)c.getInt("calendar", "word", 14));
+  TEST_ASSERT_EQUAL_INT(14, (int)c.getInt("calendar", "empty", 14));
+  TEST_ASSERT_EQUAL_INT(14, (int)c.getInt("calendar", "missing", 14));
+}
+
+// --- Time zones ------------------------------------------------------------
+
+void test_time_zone_names_and_rules() {
+  TEST_ASSERT_EQUAL_STRING("CET-1CEST,M3.5.0,M10.5.0/3", posixTimeZone("Europe/Berlin"));
+  TEST_ASSERT_EQUAL_STRING("EST5EDT,M3.2.0,M11.1.0", posixTimeZone("America/New_York"));
+  TEST_ASSERT_EQUAL_STRING("UTC0", posixTimeZone("UTC"));
+  TEST_ASSERT_EQUAL_STRING("CET-1CEST,M3.5.0,M10.5.0/3",
+                           posixTimeZone("CET-1CEST,M3.5.0,M10.5.0/3"));
+  TEST_ASSERT_EQUAL_STRING("<+03>-3", posixTimeZone("<+03>-3"));
+  TEST_ASSERT_NULL(posixTimeZone("Mars/Olympus_Mons"));
+  TEST_ASSERT_NULL(posixTimeZone(""));
+  TEST_ASSERT_NULL(posixTimeZone(nullptr));
+}
+
 // --- HelloWorldApp ---------------------------------------------------------
 
 void test_hello_world_app_flow() {
@@ -281,6 +363,84 @@ void test_hello_world_app_without_owner_name() {
   TEST_ASSERT_EQUAL_STRING("Name is not set yet", hello.introduction().c_str());
 }
 
+void test_shell_ticks_only_the_open_app() {
+  Shell shell;
+  WorkingApp app;
+  shell.addApp(&app);
+  TEST_ASSERT_FALSE(shell.tick());
+  TEST_ASSERT_EQUAL(0, app.ticks);
+
+  shell.handle(InputEvent::Select);
+  TEST_ASSERT_FALSE(shell.tick());
+  app.redraw = true;
+  TEST_ASSERT_TRUE(shell.tick());
+  TEST_ASSERT_EQUAL(2, app.ticks);
+
+  shell.handle(InputEvent::Back);
+  TEST_ASSERT_FALSE(shell.tick());
+  TEST_ASSERT_EQUAL(2, app.ticks);
+}
+
+void test_app_can_request_a_quality_refresh() {
+  Shell shell;
+  WorkingApp app;
+  FakeDisplay display;
+  shell.addApp(&app);
+  shell.handle(InputEvent::Select);
+  shell.draw(display);
+  ASSERT_ENUM(Refresh::Fast, shell.nextRefresh());
+  app.full = true;
+  ASSERT_ENUM(Refresh::Quality, shell.nextRefresh());
+  shell.draw(display);
+  ASSERT_ENUM(Refresh::Quality, display.lastRefresh);
+}
+
+void test_home_screen_shows_the_battery_level() {
+  Shell shell;
+  FakeBattery battery;
+  FakeDisplay display;
+  shell.setBattery(&battery);
+  shell.draw(display);
+  TEST_ASSERT_TRUE(display.shows("87%"));
+
+  battery.charge = -1;  // can't be read
+  shell.draw(display);
+  for (const std::string& text : display.texts) {
+    TEST_ASSERT_EQUAL(std::string::npos, text.find('%'));
+  }
+}
+
+void test_wifi_status_icon() {
+  FakeDisplay display;
+  display.beginFrame(Color::White);
+  TEST_ASSERT_EQUAL_INT(0, drawWifiStatus(display, NetworkState::Off, 500, 0, 24));
+  TEST_ASSERT_EQUAL_INT(0, drawWifiStatus(display, NetworkState::Failed, 500, 0, 24));
+  TEST_ASSERT_EQUAL_INT(0, display.filledRects + display.outlinedRects);
+
+  const int width = drawWifiStatus(display, NetworkState::Connected, 500, 0, 24);
+  TEST_ASSERT_TRUE(width > 0);
+  TEST_ASSERT_EQUAL_INT(3, display.filledRects);
+  TEST_ASSERT_EQUAL_INT(width, drawWifiStatus(display, NetworkState::Connecting, 500, 0, 24));
+  TEST_ASSERT_EQUAL_INT(3, display.outlinedRects);
+}
+
+void test_config_reads_yes_no_settings() {
+  Config config;
+  config.parse("[Developer]\n"
+               "debug = \"true\"\n"
+               "a = TRUE\n"
+               "b = 'no'\n"
+               "c = 0\n"
+               "d = maybe\n");
+  TEST_ASSERT_TRUE(config.getBool("Developer", "debug", false));
+  TEST_ASSERT_TRUE(config.getBool("Developer", "a", false));
+  TEST_ASSERT_FALSE(config.getBool("Developer", "b", true));
+  TEST_ASSERT_FALSE(config.getBool("Developer", "c", true));
+  TEST_ASSERT_TRUE(config.getBool("Developer", "d", true));        // not a yes/no
+  TEST_ASSERT_FALSE(config.getBool("developer", "debug", false));  // names are matched as written
+  TEST_ASSERT_TRUE(config.getBool("Developer", "missing", true));
+}
+
 int main(int, char**) {
   UNITY_BEGIN();
   RUN_TEST(test_short_press_fires_on_release);
@@ -296,7 +456,15 @@ int main(int, char**) {
   RUN_TEST(test_config_missing_values_use_fallback);
   RUN_TEST(test_config_skips_bad_lines_and_keeps_good_ones);
   RUN_TEST(test_config_last_definition_wins_and_parse_resets);
+  RUN_TEST(test_config_array_tables);
+  RUN_TEST(test_config_reads_whole_numbers);
+  RUN_TEST(test_config_reads_yes_no_settings);
+  RUN_TEST(test_time_zone_names_and_rules);
   RUN_TEST(test_hello_world_app_flow);
   RUN_TEST(test_hello_world_app_without_owner_name);
+  RUN_TEST(test_shell_ticks_only_the_open_app);
+  RUN_TEST(test_home_screen_shows_the_battery_level);
+  RUN_TEST(test_app_can_request_a_quality_refresh);
+  RUN_TEST(test_wifi_status_icon);
   return UNITY_END();
 }

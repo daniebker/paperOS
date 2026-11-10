@@ -8,7 +8,8 @@ namespace paperos {
 // sticks to a few so it stays crisp on e-paper.
 enum class Color : uint8_t { White, LightGray, DarkGray, Black };
 
-enum class TextSize : uint8_t { Small, Medium, Large, Title };
+// Large and Title are bold; ExtraLarge is the biggest regular weight.
+enum class TextSize : uint8_t { Small, Medium, Large, Title, ExtraLarge };
 
 enum class TextAlign : uint8_t { Left, Center, Right };
 
@@ -43,6 +44,8 @@ class Display {
                         Color color = Color::Black) = 0;
   // Line height in pixels for a given text size.
   virtual int textHeight(TextSize size) const = 0;
+  // Width in pixels of `text` at a given text size.
+  virtual int textWidth(const char* text, TextSize size) const = 0;
 };
 
 }  // namespace paperos

@@ -3,7 +3,7 @@
 #include <cstdlib>
 #include <cstring>
 
-#include "AsciiFold.h"
+#include <paperos/AsciiFold.h>
 
 namespace ereader {
 
@@ -88,7 +88,9 @@ void XhtmlParser::emit(uint32_t codePoint) {
     sink_.onChar(' ');
     return;
   }
-  for (const char* text = foldToAscii(codePoint); *text != '\0'; ++text) sink_.onChar(*text);
+  for (const char* text = paperos::foldToAscii(codePoint); *text != '\0'; ++text) {
+    sink_.onChar(*text);
+  }
 }
 
 void XhtmlParser::feedText(char c) {

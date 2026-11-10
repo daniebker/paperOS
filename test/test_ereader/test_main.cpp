@@ -1,7 +1,7 @@
 // Host-side tests for the e-reader app. Run with: pio test -e native
 #include <unity.h>
 
-#include <AsciiFold.h>
+#include <paperos/AsciiFold.h>
 #include <BookCache.h>
 #include <EReaderApp.h>
 #include <Epub.h>

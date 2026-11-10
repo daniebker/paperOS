@@ -1,7 +1,7 @@
 # paperOS
 A firmware for the PaperDIY by M5Stack.
 
-paperOS is a small app launcher for the PaperDIY's 4.7" e-paper display, shown in portrait (540x960) by default. It ships with an **E-Reader** for EPUB books and a sample **Hello World** app, which greets you in five languages (press A / B to switch) and introduces the owner named in `config.toml`. Planned apps include a to-do list and a calendar view.
+paperOS is a small app launcher for the PaperDIY's 4.7" e-paper display, shown in portrait (540x960) by default. It ships with an **E-Reader** for EPUB books, a **Calendar** that shows your upcoming events from iCal links, and a sample **Hello World** app, which greets you in five languages (press A / B to switch) and introduces the owner named in `config.toml`. Planned apps include a to-do list.
 
 ## Controls
 
@@ -52,6 +52,48 @@ Good to know:
 - The display fonts are ASCII-only, so curly quotes and dashes become plain ones and accents are dropped (`café` shows as `cafe`). Scripts with no ASCII equivalent, such as Cyrillic, Greek or CJK, show as `?`.
 - DRM-protected books can't be read.
 
+## Calendar
+
+The Calendar shows the coming two weeks of events from one or more iCal (`.ics`) links, such as the secret address of a Google, Outlook, iCloud or Nextcloud calendar. It downloads them over Wi-Fi, so add your network, time zone and calendars to `config.toml`:
+
+```toml
+[time]
+  timezone = "Europe/Berlin"
+
+[wifi]
+  ssid = "MyNetwork"
+  password = "secret"
+
+[[calendar.feed]]
+  name = "Personal"
+  url = "https://calendar.google.com/calendar/ical/.../basic.ics"
+
+[[calendar.feed]]
+  name = "Work"
+  url = "webcal://outlook.office365.com/owa/calendar/.../calendar.ics"
+```
+
+Add a `[[calendar.feed]]` block for each calendar. Events are listed by day with their time and location; with more than one calendar, each event also shows which calendar it's from.
+
+| Input        | Calendar                     |
+|--------------|------------------------------|
+| Press **A**  | Previous page                |
+| Press **B**  | Next page                    |
+| Hold **A**   | Download the calendars now   |
+| Hold **B**   | Back to home screen          |
+
+When you open the Calendar it shows the copy saved on the SD card straight away. It downloads again if that copy is older than `refresh_minutes`, and keeps doing so while it stays open. The footer shows when the calendars were last updated, or what went wrong. Wi-Fi is switched off again after each download.
+
+The device has no clock of its own that survives a restart unless the board has a battery-backed RTC, so the first download also sets the time from the internet. If the date isn't known yet, the Calendar says so and gets it as soon as it can connect.
+
+Good to know:
+
+- The calendars are saved in `/calendar` on the SD card. It's safe to delete; they're downloaded again.
+- Recurring events are supported, including exceptions and single occurrences that were moved or cancelled. Rules that repeat more often than daily show only their first occurrence.
+- Times are converted to your `timezone` using the time zones in the calendar file. Times in a zone the file doesn't describe are taken to be in your own time zone.
+- https certificates are checked, so a calendar behind a proxy that intercepts TLS won't download.
+- Titles and locations are ASCII-only, like the E-Reader: `café` shows as `cafe`.
+
 ## Configuration
 
 At boot, paperOS reads `config.toml` from the root of the SD card. There's an example in [`sdcard/config.toml`](sdcard/config.toml):
@@ -64,10 +106,15 @@ At boot, paperOS reads `config.toml` from the root of the SD card. There's an ex
 | Setting        | Used by     | Effect                                         |
 |----------------|-------------|------------------------------------------------|
 | `[owner] name` | Hello World | Shows "My name is <name>" under the greeting, in the selected language |
+| `[time] timezone` | Calendar | Local time zone: a name such as `Europe/Berlin`, or a POSIX TZ rule such as `CET-1CEST,M3.5.0,M10.5.0/3`. Default `UTC` |
+| `[wifi] ssid`, `password` | Calendar | Wi-Fi network for downloading calendars and setting the clock |
+| `[calendar] days` | Calendar | How many days ahead to show, 1 to 62. Default 14 |
+| `[calendar] refresh_minutes` | Calendar | How often to download again while open. `0` downloads only when you hold A. Default 60 |
+| `[[calendar.feed]] name`, `url` | Calendar | One block per calendar: its name, and its `https://`, `http://` or `webcal://` iCal address |
 
 The file is only read at startup, so restart the device after changing it. If the card or file is missing, paperOS still starts and apps use their defaults.
 
-The parser supports a subset of TOML: `[section]` headers, `key = "string"`, `key = 'literal'`, bare values such as numbers and booleans, and `#` comments. Lines it can't parse are skipped and reported on the serial log. The display fonts are ASCII-only for now, so accented letters in the name won't render yet.
+The parser supports a subset of TOML: `[section]` headers, `[[table]]` arrays such as `[[calendar.feed]]`, `key = "string"`, `key = 'literal'`, bare values such as numbers and booleans, and `#` comments. Lines it can't parse are skipped and reported on the serial log. The display fonts are ASCII-only for now, so accented letters in the name won't render yet.
 
 ## Repository layout
 
@@ -79,15 +126,22 @@ src/                      firmware entry point and M5Stack hardware glue
   M5Display.{h,cpp}       paperos::Display implemented with M5GFX
   SdConfig.{h,cpp}        mounts the SD card and loads /config.toml
   SdFileSystem.{h,cpp}    paperos::FileSystem implemented with the SD library
+  EspClock.{h,cpp}        paperos::Clock: system time, set over SNTP, saved to the RTC
+  EspNetwork.{h,cpp}      paperos::Network: Wi-Fi and HTTP(S) downloads
 lib/paperos-core/         hardware-independent OS core
   src/paperos/App.h       base class every app implements
+  src/paperos/AsciiFold.* Unicode to ASCII folding for the display fonts
   src/paperos/Battery.*   battery level interface and indicator
+  src/paperos/Clock.h     wall-clock time interface
   src/paperos/Config.*    config.toml parser and lookup
   src/paperos/Display.h   drawing interface apps render to
   src/paperos/FileSystem.h  storage interface used by apps
   src/paperos/Input.*     button -> gesture -> navigation event mapping
+  src/paperos/Network.h   Wi-Fi and HTTP interface used by apps
   src/paperos/Shell.*     home screen and app switching
+  src/paperos/TimeZone.*  time zone names to POSIX TZ rules
 apps/                     one folder per app
+  calendar-app/           agenda from iCal links
   ereader-app/            EPUB reader
   hello-world-app/        sample app
 sdcard/                   example files to copy onto the SD card
@@ -152,7 +206,7 @@ When the upload finishes, the device restarts into paperOS and shows the home sc
 ### 5. Prepare the SD card (optional)
 
 1. Copy [`sdcard/config.toml`](sdcard/config.toml) to the root of a FAT32-formatted microSD card.
-2. Edit `name` to your own.
+2. Edit `name` to your own. For the Calendar, also set your time zone, Wi-Fi network and calendar links (see [Calendar](#calendar)).
 3. Create a `books` folder on the card and copy your `.epub` files into it.
 4. Insert the card and restart the device.
 

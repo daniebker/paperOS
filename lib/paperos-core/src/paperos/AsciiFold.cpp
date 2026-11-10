@@ -1,6 +1,6 @@
-#include "AsciiFold.h"
+#include "paperos/AsciiFold.h"
 
-namespace ereader {
+namespace paperos {
 
 namespace {
 
@@ -113,4 +113,30 @@ const char* foldToAscii(uint32_t cp) {
   }
 }
 
-}  // namespace ereader
+std::string foldUtf8ToAscii(const std::string& text) {
+  std::string out;
+  out.reserve(text.size());
+  size_t i = 0;
+  while (i < text.size()) {
+    const uint8_t lead = uint8_t(text[i++]);
+    if (lead < 0x80) {
+      out += foldToAscii(lead);
+      continue;
+    }
+    const int extra = lead >= 0xF0 && lead < 0xF8 ? 3 : lead >= 0xE0 ? 2 : lead >= 0xC0 ? 1 : -1;
+    if (extra < 0 || lead >= 0xF8) {
+      out += '?';
+      continue;
+    }
+    uint32_t cp = lead & (0x3F >> extra);
+    int n = 0;
+    while (n < extra && i < text.size() && (uint8_t(text[i]) & 0xC0) == 0x80) {
+      cp = (cp << 6) | (uint8_t(text[i++]) & 0x3F);
+      ++n;
+    }
+    out += n == extra ? foldToAscii(cp) : "?";
+  }
+  return out;
+}
+
+}  // namespace paperos

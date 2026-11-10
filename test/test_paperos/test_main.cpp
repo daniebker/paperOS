@@ -236,6 +236,62 @@ void test_config_last_definition_wins_and_parse_resets() {
   TEST_ASSERT_FALSE(c.has("owner", "name"));
 }
 
+void test_config_array_tables() {
+  Config c;
+  const char* text =
+      "[calendar]\n"
+      "  days = 7\n"
+      "[[calendar.feed]]\n"
+      "  name = \"Home\"\n"
+      "  url = \"https://a.example/home.ics\"\n"
+      "[[ calendar . feed ]]  # second\n"
+      "  url = \"webcal://b.example/work.ics\"\n"
+      "[owner]\n"
+      "  name = \"Dan\"\n";
+  TEST_ASSERT_TRUE(c.parse(text));
+  TEST_ASSERT_EQUAL_INT(2, (int)c.tableCount("calendar.feed"));
+  TEST_ASSERT_EQUAL_INT(0, (int)c.tableCount("calendar"));
+  TEST_ASSERT_EQUAL_STRING("Home", c.getTableString("calendar.feed", 0, "name"));
+  TEST_ASSERT_EQUAL_STRING("https://a.example/home.ics", c.getTableString("calendar.feed", 0, "url"));
+  TEST_ASSERT_EQUAL_STRING("webcal://b.example/work.ics",
+                           c.getTableString("calendar.feed", 1, "url"));
+  TEST_ASSERT_EQUAL_STRING("none", c.getTableString("calendar.feed", 1, "name", "none"));
+  TEST_ASSERT_EQUAL_STRING("none", c.getTableString("calendar.feed", 2, "url", "none"));
+  // Table keys don't leak into a [section] of the same name, and back.
+  TEST_ASSERT_FALSE(c.has("calendar.feed", "url"));
+  TEST_ASSERT_EQUAL_STRING("", c.getTableString("calendar", 0, "days"));
+  TEST_ASSERT_EQUAL_STRING("Dan", c.getString("owner", "name"));
+
+  TEST_ASSERT_FALSE(c.parse("[[feed]\n[feed]]\n[[]]\n"));
+  TEST_ASSERT_EQUAL_INT(3, c.errorCount());
+  TEST_ASSERT_EQUAL_INT(0, (int)c.tableCount("feed"));
+}
+
+void test_config_reads_whole_numbers() {
+  Config c;
+  c.parse("[calendar]\ndays = 21\nneg = -3\nbad = 2.5\nword = \"7\"\nempty = \"\"\n");
+  TEST_ASSERT_EQUAL_INT(21, (int)c.getInt("calendar", "days", 14));
+  TEST_ASSERT_EQUAL_INT(-3, (int)c.getInt("calendar", "neg", 0));
+  TEST_ASSERT_EQUAL_INT(14, (int)c.getInt("calendar", "bad", 14));
+  TEST_ASSERT_EQUAL_INT(7, (int)c.getInt("calendar", "word", 14));
+  TEST_ASSERT_EQUAL_INT(14, (int)c.getInt("calendar", "empty", 14));
+  TEST_ASSERT_EQUAL_INT(14, (int)c.getInt("calendar", "missing", 14));
+}
+
+// --- Time zones ------------------------------------------------------------
+
+void test_time_zone_names_and_rules() {
+  TEST_ASSERT_EQUAL_STRING("CET-1CEST,M3.5.0,M10.5.0/3", posixTimeZone("Europe/Berlin"));
+  TEST_ASSERT_EQUAL_STRING("EST5EDT,M3.2.0,M11.1.0", posixTimeZone("America/New_York"));
+  TEST_ASSERT_EQUAL_STRING("UTC0", posixTimeZone("UTC"));
+  TEST_ASSERT_EQUAL_STRING("CET-1CEST,M3.5.0,M10.5.0/3",
+                           posixTimeZone("CET-1CEST,M3.5.0,M10.5.0/3"));
+  TEST_ASSERT_EQUAL_STRING("<+03>-3", posixTimeZone("<+03>-3"));
+  TEST_ASSERT_NULL(posixTimeZone("Mars/Olympus_Mons"));
+  TEST_ASSERT_NULL(posixTimeZone(""));
+  TEST_ASSERT_NULL(posixTimeZone(nullptr));
+}
+
 // --- HelloWorldApp ---------------------------------------------------------
 
 void test_hello_world_app_flow() {
@@ -365,6 +421,9 @@ int main(int, char**) {
   RUN_TEST(test_config_missing_values_use_fallback);
   RUN_TEST(test_config_skips_bad_lines_and_keeps_good_ones);
   RUN_TEST(test_config_last_definition_wins_and_parse_resets);
+  RUN_TEST(test_config_array_tables);
+  RUN_TEST(test_config_reads_whole_numbers);
+  RUN_TEST(test_time_zone_names_and_rules);
   RUN_TEST(test_hello_world_app_flow);
   RUN_TEST(test_hello_world_app_without_owner_name);
   RUN_TEST(test_shell_ticks_only_the_open_app);

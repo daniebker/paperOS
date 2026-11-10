@@ -1,5 +1,7 @@
 #include "paperos/Config.h"
 
+#include <cerrno>
+#include <cstdlib>
 #include <cstring>
 
 namespace paperos {
@@ -28,6 +30,20 @@ bool parseBareKey(const std::string& s, size_t& i, std::string& out) {
   while (i < s.size() && isBareKeyChar(s[i])) ++i;
   out.assign(s, start, i - start);
   return !out.empty();
+}
+
+// A header name: bare keys joined by dots, e.g. "calendar.feed".
+bool parseHeaderName(const std::string& s, size_t& i, std::string& out) {
+  out.clear();
+  std::string part;
+  do {
+    if (!out.empty()) out += '.';
+    skipSpace(s, i);
+    if (!parseBareKey(s, i, part)) return false;
+    out += part;
+    skipSpace(s, i);
+  } while (i < s.size() && s[i] == '.' && ++i);
+  return true;
 }
 
 // Parses a "basic string" starting at the opening quote.
@@ -78,6 +94,7 @@ bool parseBareValue(const std::string& s, size_t& i, std::string& out) {
 
 void Config::clear() {
   entries_.clear();
+  tables_.clear();
   errorCount_ = 0;
   firstErrorLine_ = 0;
 }
@@ -92,6 +109,7 @@ bool Config::parse(const char* text) {
   if (std::strncmp(text, "\xEF\xBB\xBF", 3) == 0) text += 3;  // UTF-8 BOM
 
   std::string section;
+  int index = -1;
   int lineNo = 0;
   const char* p = text;
   while (*p != '\0') {
@@ -105,20 +123,23 @@ bool Config::parse(const char* text) {
     skipSpace(line, i);
     if (atLineEnd(line, i)) continue;  // blank or comment
 
-    if (line[i] == '[') {  // [section]
-      ++i;
-      skipSpace(line, i);
+    if (line[i] == '[') {  // [section] or [[table]]
+      const bool isTable = i + 1 < line.size() && line[i + 1] == '[';
+      i += isTable ? 2 : 1;
       std::string name;
-      if (!parseBareKey(line, i, name)) {
+      if (!parseHeaderName(line, i, name)) {
         recordError(lineNo);
         continue;
       }
-      skipSpace(line, i);
-      if (i >= line.size() || line[i] != ']' || !atLineEnd(line, i + 1)) {
+      const char* close = isTable ? "]]" : "]";
+      const size_t closeLen = isTable ? 2 : 1;
+      if (line.compare(i, closeLen, close) != 0 || !atLineEnd(line, i + closeLen)) {
         recordError(lineNo);
         continue;
       }
       section = name;
+      index = isTable ? int(tableCount(name.c_str())) : -1;
+      if (isTable) tables_.push_back(name);
       continue;
     }
 
@@ -152,35 +173,59 @@ bool Config::parse(const char* text) {
       recordError(lineNo);
       continue;
     }
-    set(section, key, value);
+    set(section, index, key, value);
   }
   return errorCount_ == 0;
 }
 
-void Config::set(const std::string& section, const std::string& key, const std::string& value) {
+void Config::set(const std::string& section, int index, const std::string& key,
+                 const std::string& value) {
   for (auto& e : entries_) {
-    if (e.section == section && e.key == key) {
+    if (e.section == section && e.index == index && e.key == key) {
       e.value = value;  // last definition wins
       return;
     }
   }
-  entries_.push_back(Entry{section, key, value});
+  entries_.push_back(Entry{section, key, value, index});
 }
 
-const Config::Entry* Config::find(const char* section, const char* key) const {
+const Config::Entry* Config::find(const char* section, int index, const char* key) const {
   if (section == nullptr) section = "";
   if (key == nullptr) return nullptr;
   for (const auto& e : entries_) {
-    if (e.section == section && e.key == key) return &e;
+    if (e.section == section && e.index == index && e.key == key) return &e;
   }
   return nullptr;
 }
 
 const char* Config::getString(const char* section, const char* key, const char* fallback) const {
-  const Entry* e = find(section, key);
+  const Entry* e = find(section, -1, key);
   return e ? e->value.c_str() : fallback;
 }
 
-bool Config::has(const char* section, const char* key) const { return find(section, key) != nullptr; }
+bool Config::has(const char* section, const char* key) const {
+  return find(section, -1, key) != nullptr;
+}
+
+long Config::getInt(const char* section, const char* key, long fallback) const {
+  const Entry* e = find(section, -1, key);
+  if (e == nullptr || e->value.empty()) return fallback;
+  char* end = nullptr;
+  errno = 0;
+  const long value = std::strtol(e->value.c_str(), &end, 10);
+  return errno == 0 && *end == '\0' ? value : fallback;
+}
+
+size_t Config::tableCount(const char* table) const {
+  size_t count = 0;
+  for (const auto& name : tables_) count += table != nullptr && name == table;
+  return count;
+}
+
+const char* Config::getTableString(const char* table, size_t index, const char* key,
+                                   const char* fallback) const {
+  const Entry* e = find(table, int(index), key);
+  return e ? e->value.c_str() : fallback;
+}
 
 }  // namespace paperos

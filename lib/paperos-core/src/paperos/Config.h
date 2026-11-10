@@ -28,6 +28,10 @@ class Config {
   // Returns the value as a whole number, or `fallback` if it is not set or
   // not a whole number.
   long getInt(const char* section, const char* key, long fallback) const;
+  // Returns the value as a yes/no setting, or `fallback` if it is not set or
+  // not one. Accepts true/false, yes/no, on/off and 1/0, quoted or bare, in
+  // any case.
+  bool getBool(const char* section, const char* key, bool fallback) const;
 
   // Number of [[table]] headers with this name.
   size_t tableCount(const char* table) const;

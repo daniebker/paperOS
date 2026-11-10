@@ -74,6 +74,11 @@ class CalendarApp : public paperos::App {
   std::string statusText() const;
   // Wi-Fi state shown in the header.
   paperos::NetworkState wifiState() const;
+  // True when [Developer] debug is on in config.toml.
+  bool debug() const { return debug_; }
+  // With debug on, why Wi-Fi last failed to connect, shown above the footer.
+  // Empty otherwise.
+  const std::string& wifiFailureDetail() const { return wifiDetail_; }
   // Unix time of the last download, or 0 if never.
   int64_t lastSync() const { return lastSync_; }
 
@@ -101,6 +106,8 @@ class CalendarApp : public paperos::App {
   int rowHeight(const Row& row) const;
   int bodyTop() const;
   int bodyBottom() const;
+  std::vector<std::string> debugLines() const;
+  void setWifiDetail(std::string detail);
 
   void drawRow(paperos::Display& display, const Row& row, int y) const;
   void drawMessage(paperos::Display& display, const char* title, const char* detail) const;
@@ -115,6 +122,7 @@ class CalendarApp : public paperos::App {
   std::vector<Feed> feeds_;
   int days_ = kDefaultDays;
   int refreshMinutes_ = kDefaultRefreshMinutes;
+  bool debug_ = false;
 
   Phase phase_ = Phase::Idle;
   uint32_t phaseStartedMs_ = 0;
@@ -138,6 +146,7 @@ class CalendarApp : public paperos::App {
   bool syncAttempted_ = false;
   uint32_t syncAttemptMs_ = 0;
   std::vector<std::string> errors_;  // from the last sync
+  std::string wifiDetail_;  // see wifiFailureDetail()
   int64_t lastSync_ = 0;
 
   std::vector<calendar::Occurrence> occurrences_;

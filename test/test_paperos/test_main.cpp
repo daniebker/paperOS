@@ -424,6 +424,23 @@ void test_wifi_status_icon() {
   TEST_ASSERT_EQUAL_INT(3, display.outlinedRects);
 }
 
+void test_config_reads_yes_no_settings() {
+  Config config;
+  config.parse("[Developer]\n"
+               "debug = \"true\"\n"
+               "a = TRUE\n"
+               "b = 'no'\n"
+               "c = 0\n"
+               "d = maybe\n");
+  TEST_ASSERT_TRUE(config.getBool("Developer", "debug", false));
+  TEST_ASSERT_TRUE(config.getBool("Developer", "a", false));
+  TEST_ASSERT_FALSE(config.getBool("Developer", "b", true));
+  TEST_ASSERT_FALSE(config.getBool("Developer", "c", true));
+  TEST_ASSERT_TRUE(config.getBool("Developer", "d", true));        // not a yes/no
+  TEST_ASSERT_FALSE(config.getBool("developer", "debug", false));  // names are matched as written
+  TEST_ASSERT_TRUE(config.getBool("Developer", "missing", true));
+}
+
 int main(int, char**) {
   UNITY_BEGIN();
   RUN_TEST(test_short_press_fires_on_release);
@@ -441,6 +458,7 @@ int main(int, char**) {
   RUN_TEST(test_config_last_definition_wins_and_parse_resets);
   RUN_TEST(test_config_array_tables);
   RUN_TEST(test_config_reads_whole_numbers);
+  RUN_TEST(test_config_reads_yes_no_settings);
   RUN_TEST(test_time_zone_names_and_rules);
   RUN_TEST(test_hello_world_app_flow);
   RUN_TEST(test_hello_world_app_without_owner_name);

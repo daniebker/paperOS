@@ -21,6 +21,7 @@ class EspNetwork : public paperos::Network {
   void connect() override;
   void disconnect() override;
   paperos::NetworkState state() override;
+  std::string failureDetail() const override { return failureDetail_; }
   std::unique_ptr<paperos::HttpResponse> get(const char* url, std::string& error) override;
 
  private:
@@ -28,4 +29,5 @@ class EspNetwork : public paperos::Network {
   std::string password_;
   paperos::NetworkState state_ = paperos::NetworkState::Off;
   uint32_t connectStartedMs_ = 0;
+  std::string failureDetail_;
 };

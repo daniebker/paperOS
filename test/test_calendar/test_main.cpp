@@ -161,6 +161,7 @@ class FakeNetwork : public Network {
     ++disconnects;
     state_ = NetworkState::Off;
   }
+  std::string failureDetail() const override { return joinFails ? detail : ""; }
   NetworkState state() override {
     if (state_ == NetworkState::Connecting && ++polls_ >= 3) {
       state_ = joinFails ? NetworkState::Failed : NetworkState::Connected;
@@ -180,6 +181,7 @@ class FakeNetwork : public Network {
 
   bool isConfigured = true;
   bool joinFails = false;
+  std::string detail = "network not found; reason 201 NO_AP_FOUND";
   bool failAtEnd = false;
   std::map<std::string, std::string> bodies;
   std::vector<std::string> requests;
@@ -778,6 +780,44 @@ void test_app_reports_wifi_failure() {
   TEST_ASSERT_TRUE(f.display.shows("No events"));
 }
 
+void test_debug_shows_why_wifi_failed() {
+  // Off by default: no detail.
+  {
+    AppFixture f(kOneFeed);
+    f.network.joinFails = true;
+    f.app.onOpen();
+    f.runUntilIdle();
+    TEST_ASSERT_FALSE(f.app.debug());
+    TEST_ASSERT_EQUAL_STRING("", f.app.wifiFailureDetail().c_str());
+    f.draw();
+    TEST_ASSERT_FALSE(f.display.showsPart("NO_AP_FOUND"));
+  }
+
+  const std::string debugConfig = std::string(kOneFeed) + "[Developer]\ndebug = \"true\"\n";
+  AppFixture f(debugConfig.c_str());
+  f.network.joinFails = true;
+  f.network.detail = "\"Home\": network not found; reason 201 NO_AP_FOUND; after 20.0s; "
+                     "MAC 24:0A:C4:00:00:01";
+  f.app.onOpen();
+  f.runUntilIdle();
+  TEST_ASSERT_TRUE(f.app.debug());
+  TEST_ASSERT_EQUAL_STRING(f.network.detail.c_str(), f.app.wifiFailureDetail().c_str());
+  f.draw();
+  TEST_ASSERT_TRUE(f.display.shows("Could not connect to Wi-Fi"));
+  TEST_ASSERT_TRUE(f.display.showsPart("Wi-Fi: \"Home\": network not found"));
+  TEST_ASSERT_TRUE(f.display.showsPart("NO_AP_FOUND"));
+  TEST_ASSERT_TRUE(f.display.showsPart("24:0A:C4:00:00:01"));
+  TEST_ASSERT_TRUE(f.display.shows("Today, Mon 9 Nov"));
+
+  // A successful retry clears it.
+  f.network.joinFails = false;
+  TEST_ASSERT_TRUE(f.app.onInput(InputEvent::Select));
+  f.runUntilIdle();
+  TEST_ASSERT_EQUAL_STRING("", f.app.wifiFailureDetail().c_str());
+  f.draw();
+  TEST_ASSERT_FALSE(f.display.showsPart("NO_AP_FOUND"));
+}
+
 void test_app_gets_the_time_before_downloading() {
   AppFixture f(kOneFeed);
   f.clock.time = -1;
@@ -947,6 +987,7 @@ int main(int, char**) {
   RUN_TEST(test_app_downloads_again_when_the_copy_is_stale);
   RUN_TEST(test_failed_download_keeps_the_old_copy);
   RUN_TEST(test_app_reports_wifi_failure);
+  RUN_TEST(test_debug_shows_why_wifi_failed);
   RUN_TEST(test_app_gets_the_time_before_downloading);
   RUN_TEST(test_app_without_wifi_or_feeds_explains_what_to_set);
   RUN_TEST(test_app_pages_through_a_busy_agenda);

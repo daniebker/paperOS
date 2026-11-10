@@ -5,6 +5,8 @@
 #include <WiFi.h>
 #include <WiFiClientSecure.h>
 
+#include <cstdio>
+
 // The ESP-IDF's root certificate bundle, linked in from libmbedtls.
 extern const uint8_t kRootCertificates[] asm("_binary_x509_crt_bundle_start");
 
@@ -15,6 +17,22 @@ constexpr uint32_t kConnectTimeoutMs = 10000;
 constexpr uint16_t kHeaderTimeoutMs = 15000;
 // A download with no data for this long has failed.
 constexpr uint32_t kStallTimeoutMs = 20000;
+
+// Reason the station last disconnected, set from the Wi-Fi event task.
+volatile int lastDisconnectReason = 0;
+
+const char* statusName(wl_status_t status) {
+  switch (status) {
+    case WL_IDLE_STATUS: return "idle";
+    case WL_NO_SSID_AVAIL: return "network not found";
+    case WL_SCAN_COMPLETED: return "scan completed";
+    case WL_CONNECTED: return "connected";
+    case WL_CONNECT_FAILED: return "connect failed";
+    case WL_CONNECTION_LOST: return "connection lost";
+    case WL_DISCONNECTED: return "disconnected";
+    default: return "unknown";
+  }
+}
 
 bool startsWith(const std::string& text, const char* prefix) {
   return text.compare(0, strlen(prefix), prefix) == 0;
@@ -98,10 +116,16 @@ class EspHttpResponse : public paperos::HttpResponse {
 void EspNetwork::begin(const paperos::Config& config) {
   ssid_ = config.getString("wifi", "ssid", "");
   password_ = config.getString("wifi", "password", "");
+  WiFi.onEvent(
+      [](arduino_event_id_t, arduino_event_info_t info) {
+        lastDisconnectReason = info.wifi_sta_disconnected.reason;
+      },
+      ARDUINO_EVENT_WIFI_STA_DISCONNECTED);
 }
 
 void EspNetwork::connect() {
   if (!configured()) {
+    failureDetail_ = "no ssid set in [wifi]";
     state_ = paperos::NetworkState::Failed;
     return;
   }
@@ -109,6 +133,8 @@ void EspNetwork::connect() {
   if (state_ == paperos::NetworkState::Connected && WiFi.status() == WL_CONNECTED) return;
   M5_LOGI("Joining Wi-Fi network %s", ssid_.c_str());
   WiFi.mode(WIFI_STA);
+  failureDetail_.clear();
+  lastDisconnectReason = 0;
   WiFi.begin(ssid_.c_str(), password_.c_str());
   state_ = paperos::NetworkState::Connecting;
   connectStartedMs_ = millis();
@@ -128,7 +154,16 @@ paperos::NetworkState EspNetwork::state() {
       M5_LOGI("Wi-Fi connected, IP %s", WiFi.localIP().toString().c_str());
       state_ = paperos::NetworkState::Connected;
     } else if (status == WL_CONNECT_FAILED || millis() - connectStartedMs_ > kJoinTimeoutMs) {
-      M5_LOGW("Could not join Wi-Fi network %s (status %d)", ssid_.c_str(), int(status));
+      const uint32_t elapsed = millis() - connectStartedMs_;
+      const int reason = lastDisconnectReason;
+      char detail[200];
+      std::snprintf(detail, sizeof(detail), "\"%s\": %s; reason %d %s; after %u.%us; MAC %s",
+                    ssid_.c_str(), statusName(status), reason,
+                    reason != 0 ? WiFi.disconnectReasonName(wifi_err_reason_t(reason)) : "none",
+                    unsigned(elapsed / 1000), unsigned(elapsed % 1000 / 100),
+                    WiFi.macAddress().c_str());
+      failureDetail_ = detail;
+      M5_LOGW("Could not join Wi-Fi network %s", detail);
       disconnect();
       state_ = paperos::NetworkState::Failed;
     }

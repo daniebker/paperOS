@@ -120,12 +120,15 @@ void CalendarApp::readFeeds() {
                                                                         kDefaultDays))));
   refreshMinutes_ = int(std::max<long>(
       0, config_.getInt("calendar", "refresh_minutes", kDefaultRefreshMinutes)));
+  const char* section = config_.has("Developer", "debug") ? "Developer" : "developer";
+  debug_ = config_.getBool(section, "debug", false);
 }
 
 void CalendarApp::onOpen() {
   readFeeds();
   page_ = 0;
   errors_.clear();
+  wifiDetail_.clear();
   occurrences_.clear();
   pages_.clear();
   loaded_ = false;
@@ -229,6 +232,7 @@ bool CalendarApp::shouldSync() const {
 
 void CalendarApp::startSync() {
   errors_.clear();
+  setWifiDetail("");
   downloaded_ = 0;
   syncAttempted_ = true;
   syncAttemptMs_ = clock_.uptimeMs();
@@ -257,6 +261,14 @@ bool CalendarApp::syncStep() {
       }
       if (state == NetworkState::Failed || elapsed > kConnectTimeoutMs) {
         errors_.push_back("Could not connect to Wi-Fi");
+        if (debug_) {
+          std::string detail = network_.failureDetail();
+          if (state != NetworkState::Failed) {
+            detail = "gave up after " + std::to_string(elapsed / 1000) + "s" +
+                     (detail.empty() ? "" : "; " + detail);
+          }
+          setWifiDetail(detail.empty() ? "no detail from the Wi-Fi driver" : detail);
+        }
         finishSync();
         return true;
       }
@@ -517,9 +529,51 @@ int CalendarApp::bodyTop() const {
 }
 
 int CalendarApp::bodyBottom() const {
-  // Footer: status line, separator, button legend.
+  // Footer: debug lines, status line, separator, button legend.
   const int smallH = display_.textHeight(TextSize::Small);
-  return display_.height() - kMargin - 2 * smallH - 12 - 8 - kRowGap;
+  const size_t debugCount = debugLines().size();
+  const int debugH = debugCount == 0 ? 0 : int(debugCount) * (smallH + 4) + 8;
+  return display_.height() - kMargin - 2 * smallH - 12 - 8 - kRowGap - debugH;
+}
+
+std::vector<std::string> CalendarApp::debugLines() const {
+  constexpr size_t kMaxLines = 4;
+  std::vector<std::string> lines;
+  if (wifiDetail_.empty()) return lines;
+  const int maxW = display_.width() - 2 * kMargin;
+  const std::string text = "Wi-Fi: " + paperos::foldUtf8ToAscii(wifiDetail_);
+  // Word wrap; the last line is shortened with "..." if there is more.
+  std::string line;
+  size_t i = 0;
+  while (i < text.size()) {
+    size_t end = text.find(' ', i);
+    if (end == std::string::npos) end = text.size();
+    const std::string word = text.substr(i, end - i);
+    const std::string candidate = line.empty() ? word : line + " " + word;
+    if (line.empty() || display_.textWidth(candidate.c_str(), TextSize::Small) <= maxW) {
+      line = candidate;
+    } else {
+      if (lines.size() + 1 == kMaxLines) {
+        lines.push_back(fitToWidth(display_, line + " " + text.substr(i), TextSize::Small, maxW));
+        return lines;
+      }
+      lines.push_back(fitToWidth(display_, line, TextSize::Small, maxW));
+      line = word;
+    }
+    i = end + 1;
+  }
+  if (!line.empty()) lines.push_back(fitToWidth(display_, line, TextSize::Small, maxW));
+  return lines;
+}
+
+void CalendarApp::setWifiDetail(std::string detail) {
+  if (detail == wifiDetail_) return;
+  wifiDetail_ = std::move(detail);
+  // The footer changed height, so the agenda pages do too.
+  if (loaded_) {
+    buildPages();
+    if (page_ >= pages_.size()) page_ = pages_.empty() ? 0 : pages_.size() - 1;
+  }
 }
 
 void CalendarApp::buildPages() {
@@ -650,6 +704,13 @@ void CalendarApp::draw(paperos::Display& display) {
       fitToWidth(display, statusText(), TextSize::Small, w - 2 * kMargin - pageW - 16);
   display.drawText(status.c_str(), kMargin, statusY, TextSize::Small, TextAlign::Left,
                    Color::DarkGray);
+  const std::vector<std::string> debug = debugLines();
+  int debugY = statusY - int(debug.size()) * (smallH + 4);
+  for (const std::string& line : debug) {
+    display.drawText(line.c_str(), kMargin, debugY, TextSize::Small, TextAlign::Left,
+                     Color::DarkGray);
+    debugY += smallH + 4;
+  }
   display.drawLine(0, lineY, w, lineY, Color::DarkGray);
   display.drawText("A / B: page    Hold A: update    Hold B: back", w / 2, legendY,
                    TextSize::Small, TextAlign::Center, Color::DarkGray);

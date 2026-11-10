@@ -44,6 +44,9 @@ class Network {
   // Leaves the network to save power.
   virtual void disconnect() = 0;
   virtual NetworkState state() = 0;
+  // Technical detail on why joining the network last failed, such as the
+  // driver's reason code, for debugging. Empty if there is none.
+  virtual std::string failureDetail() const { return {}; }
 
   // Sends a GET request and waits for the response headers, following
   // redirects. Accepts http://, https:// and webcal:// (fetched over https)

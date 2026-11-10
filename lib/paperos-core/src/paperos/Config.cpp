@@ -216,6 +216,18 @@ long Config::getInt(const char* section, const char* key, long fallback) const {
   return errno == 0 && *end == '\0' ? value : fallback;
 }
 
+bool Config::getBool(const char* section, const char* key, bool fallback) const {
+  const Entry* e = find(section, -1, key);
+  if (e == nullptr) return fallback;
+  std::string value = e->value;
+  for (char& c : value) {
+    if (c >= 'A' && c <= 'Z') c = char(c - 'A' + 'a');
+  }
+  if (value == "true" || value == "yes" || value == "on" || value == "1") return true;
+  if (value == "false" || value == "no" || value == "off" || value == "0") return false;
+  return fallback;
+}
+
 size_t Config::tableCount(const char* table) const {
   size_t count = 0;
   for (const auto& name : tables_) count += table != nullptr && name == table;

@@ -111,6 +111,7 @@ At boot, paperOS reads `config.toml` from the root of the SD card. There's an ex
 | `[calendar] days` | Calendar | How many days ahead to show, 1 to 62. Default 14 |
 | `[calendar] refresh_minutes` | Calendar | How often to download again while open. `0` downloads only when you hold A. Default 60 |
 | `[[calendar.feed]] name`, `url` | Calendar | One block per calendar: its name, and its `https://`, `http://` or `webcal://` iCal address |
+| `[Developer] debug` | Calendar | `"true"` shows technical detail when Wi-Fi can't connect: the network, the driver's reason code, how long it tried and the device's MAC address. Default `"false"` |
 
 The file is only read at startup, so restart the device after changing it. If the card or file is missing, paperOS still starts and apps use their defaults.
 

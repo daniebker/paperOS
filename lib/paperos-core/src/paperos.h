@@ -17,3 +17,4 @@
 #include "paperos/Sleep.h"
 #include "paperos/TimeZone.h"
 #include "paperos/WebDav.h"
+#include "paperos/XhtmlParser.h"

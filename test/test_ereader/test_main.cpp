@@ -7,7 +7,7 @@
 #include <Epub.h>
 #include <Inflate.h>
 #include <PageLayout.h>
-#include <XhtmlParser.h>
+#include <paperos/XhtmlParser.h>
 #include <ZipArchive.h>
 #include <paperos.h>
 

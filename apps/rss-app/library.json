@@ -1,0 +1,8 @@
+{
+  "name": "rss-app",
+  "version": "0.1.0",
+  "description": "paperOS RSS reader: articles from the RSS and Atom feeds set in config.toml.",
+  "dependencies": { "paperos-core": "*" },
+  "frameworks": "*",
+  "platforms": "*"
+}

@@ -4,7 +4,7 @@
 #include <cstdlib>
 #include <cstring>
 
-#include "XhtmlParser.h"
+#include <paperos/XhtmlParser.h>
 
 namespace ereader {
 
@@ -188,7 +188,7 @@ bool Epub::parsePackage(const std::string& packagePath, const std::string& xml) 
       if (field.empty()) {
         const size_t end = xml.find('<', tag.contentStart);
         if (end != std::string::npos) {
-          field = xmlTextToAscii(xml.substr(tag.contentStart, end - tag.contentStart));
+          field = paperos::xmlTextToAscii(xml.substr(tag.contentStart, end - tag.contentStart));
         }
       }
     }

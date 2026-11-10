@@ -4,7 +4,7 @@
 #include <cstdint>
 #include <string>
 
-namespace ereader {
+namespace paperos {
 
 // Receives the readable content of an XHTML document.
 class TextSink {
@@ -59,4 +59,4 @@ class XhtmlParser {
 // Plain ASCII text of an XML fragment such as "Fish &amp; Chips".
 std::string xmlTextToAscii(const std::string& xml);
 
-}  // namespace ereader
+}  // namespace paperos

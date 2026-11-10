@@ -16,6 +16,8 @@ The two side buttons handle all navigation:
 
 A hold counts as a long press once it reaches 600 ms. It fires while the button is still down.
 
+Double press the **power button** to switch off, leaving a wallpaper on the screen, and press it once to switch back on (see [Sleep](#sleep)).
+
 ## E-Reader
 
 Copy `.epub` files into a `books` folder on the SD card, then open **E-Reader** from the home screen. Books are listed by title with the pages you have left.
@@ -94,6 +96,20 @@ Good to know:
 - https certificates are checked, so a calendar behind a proxy that intercepts TLS won't download.
 - Titles and locations are ASCII-only, like the E-Reader: `café` shows as `cafe`.
 
+## Sleep
+
+After `sleep_minutes` without a button press (10 by default), or when you **double press the power button**, paperOS switches itself off to save the battery. The e-paper keeps its image without power, so it leaves a picture on the screen: a random one from the `wallpapers` folder on the SD card each time.
+
+Press the **power button** once to wake. The device starts again at the home screen; the E-Reader remembers your page as usual.
+
+Good to know:
+
+- Wallpapers can be `.jpg`, `.png` or `.bmp`. They're scaled to fill the whole 540x960 screen and centred, so the edges of an image with a different shape are cropped: a landscape image loses its sides. Portrait images at 540x960 fit exactly. Greyscale images show best on the 16-level display.
+- Progressive JPEGs can't be shown; save them as baseline JPEGs. An image that can't be shown is skipped for another one.
+- With no `wallpapers` folder, or no images in it, the screen shows "paperOS" and how to wake it.
+- While USB is plugged in the power stays on. paperOS then waits with the wallpaper up, and pressing any button starts it again.
+- Set `sleep_minutes = 0` to never sleep.
+
 ## Configuration
 
 At boot, paperOS reads `config.toml` from the root of the SD card. There's an example in [`sdcard/config.toml`](sdcard/config.toml):
@@ -106,12 +122,13 @@ At boot, paperOS reads `config.toml` from the root of the SD card. There's an ex
 | Setting        | Used by     | Effect                                         |
 |----------------|-------------|------------------------------------------------|
 | `[owner] name` | Hello World | Shows "My name is <name>" under the greeting, in the selected language |
+| `[power] sleep_minutes` | All | Switch off after this many minutes without a button press, showing a wallpaper. `0` never sleeps. Default 10 |
 | `[time] timezone` | Calendar | Local time zone: a name such as `Europe/Berlin`, or a POSIX TZ rule such as `CET-1CEST,M3.5.0,M10.5.0/3`. Default `UTC` |
 | `[wifi] ssid`, `password` | Calendar | Wi-Fi network for downloading calendars and setting the clock |
 | `[calendar] days` | Calendar | How many days ahead to show, 1 to 62. Default 14 |
 | `[calendar] refresh_minutes` | Calendar | How often to download again while open. `0` downloads only when you hold A. Default 60 |
 | `[[calendar.feed]] name`, `url` | Calendar | One block per calendar: its name, and its `https://`, `http://` or `webcal://` iCal address |
-| `[Developer] debug` | Calendar | `"true"` shows technical detail when Wi-Fi can't connect: the network, the driver's reason code, how long it tried and the device's MAC address. Default `"false"` |
+| `[Developer] debug` | All | `"true"` saves log messages to `debug.0.log` at the root of the SD card, moving on to `debug.1.log` and so on as each reaches 256 KB, and logs the power button. The Calendar also shows why Wi-Fi couldn't connect: the network, the driver's reason code, how long it tried and the device's MAC address. Default `"false"` |
 
 The file is only read at startup, so restart the device after changing it. If the card or file is missing, paperOS still starts and apps use their defaults.
 
@@ -140,6 +157,7 @@ lib/paperos-core/         hardware-independent OS core
   src/paperos/Input.*     button -> gesture -> navigation event mapping
   src/paperos/Network.h   Wi-Fi and HTTP interface used by apps
   src/paperos/Shell.*     home screen and app switching
+  src/paperos/Sleep.*     idle timer and the sleep screen
   src/paperos/TimeZone.*  time zone names to POSIX TZ rules
 apps/                     one folder per app
   calendar-app/           agenda from iCal links
@@ -209,7 +227,8 @@ When the upload finishes, the device restarts into paperOS and shows the home sc
 1. Copy [`sdcard/config.toml`](sdcard/config.toml) to the root of a FAT32-formatted microSD card.
 2. Edit `name` to your own. For the Calendar, also set your time zone, Wi-Fi network and calendar links (see [Calendar](#calendar)).
 3. Create a `books` folder on the card and copy your `.epub` files into it.
-4. Insert the card and restart the device.
+4. Optionally, create a `wallpapers` folder and copy in images to show while the device sleeps (see [Sleep](#sleep)).
+5. Insert the card and restart the device.
 
 ### 6. Watch the logs (optional)
 

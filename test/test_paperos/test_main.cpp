@@ -5,6 +5,8 @@
 #include <HelloWorldApp.h>
 
 #include <cstring>
+#include <algorithm>
+#include <map>
 #include <string>
 #include <vector>
 
@@ -45,6 +47,110 @@ class FakeDisplay : public Display {
   int frames = 0;
   Refresh lastRefresh = Refresh::Fast;
 };
+
+// A display that can show images, recording which it was asked for.
+class ImageDisplay : public FakeDisplay {
+ public:
+  bool drawImage(const char* path) override {
+    images.emplace_back(path);
+    return std::string(path).find("broken") == std::string::npos;
+  }
+  std::vector<std::string> images;
+};
+
+// Lists a fixed set of entries in /wallpapers.
+class ListingFileSystem : public FileSystem {
+ public:
+  std::unique_ptr<File> open(const char*, FileMode) override { return nullptr; }
+  bool list(const char* path, std::vector<DirEntry>& out) override {
+    if (!hasDir || std::string(path) != kWallpaperDir) return false;
+    out = entries;
+    return true;
+  }
+  bool makeDir(const char*) override { return false; }
+  bool remove(const char*) override { return false; }
+  bool rename(const char*, const char*) override { return false; }
+
+  void add(const char* name, bool isDirectory = false) {
+    DirEntry entry;
+    entry.name = name;
+    entry.isDirectory = isDirectory;
+    entries.push_back(entry);
+  }
+  bool hasDir = true;
+  std::vector<DirEntry> entries;
+};
+
+// Keeps files in memory, with append support, for the log file tests.
+class AppendFileSystem : public FileSystem {
+ public:
+  class MemoryFile : public File {
+   public:
+    explicit MemoryFile(std::string& data) : data_(data) {}
+    size_t read(void*, size_t) override { return 0; }
+    size_t write(const void* data, size_t size) override {
+      data_.append(static_cast<const char*>(data), size);
+      return size;
+    }
+    bool seek(uint32_t) override { return false; }
+    uint32_t size() const override { return uint32_t(data_.size()); }
+
+   private:
+    std::string& data_;
+  };
+
+  std::unique_ptr<File> open(const char* path, FileMode mode) override {
+    if (failWrites) return nullptr;
+    if (mode == FileMode::Write) files[path].clear();
+    if (mode == FileMode::Read && files.count(path) == 0) return nullptr;
+    return std::unique_ptr<File>(new MemoryFile(files[path]));
+  }
+  bool list(const char* path, std::vector<DirEntry>& out) override {
+    if (std::string(path) != "/") return false;
+    out.clear();
+    for (const auto& file : files) {
+      DirEntry entry;
+      entry.name = file.first.substr(1);
+      entry.size = uint32_t(file.second.size());
+      out.push_back(entry);
+    }
+    return true;
+  }
+  bool makeDir(const char*) override { return false; }
+  bool remove(const char* path) override { return files.erase(path) > 0; }
+  bool rename(const char*, const char*) override { return false; }
+
+  std::map<std::string, std::string> files;
+  bool failWrites = false;
+};
+
+// An in-memory file to read image headers from.
+class BytesFile : public File {
+ public:
+  explicit BytesFile(std::string data) : data_(std::move(data)) {}
+  size_t read(void* buffer, size_t size) override {
+    const size_t n = pos_ < data_.size() ? std::min(size, data_.size() - pos_) : 0;
+    std::memcpy(buffer, data_.data() + pos_, n);
+    pos_ += n;
+    return n;
+  }
+  size_t write(const void*, size_t) override { return 0; }
+  bool seek(uint32_t position) override {
+    pos_ = position;
+    return position <= data_.size();
+  }
+  uint32_t size() const override { return uint32_t(data_.size()); }
+
+ private:
+  std::string data_;
+  size_t pos_ = 0;
+};
+
+std::string bytes(std::initializer_list<int> values) {
+  std::string out;
+  for (int v : values) out += char(v);
+  return out;
+}
 
 class CountingApp : public App {
  public:
@@ -441,6 +547,260 @@ void test_config_reads_yes_no_settings() {
   TEST_ASSERT_TRUE(config.getBool("Developer", "missing", true));
 }
 
+void test_idle_timer() {
+  IdleTimer timer;
+  TEST_ASSERT_FALSE(timer.expired(0xFFFFFFF0u));  // never by default
+
+  timer.setTimeoutMinutes(10);
+  TEST_ASSERT_EQUAL_UINT32(600000u, timer.timeoutMs());
+  timer.reset(1000);
+  TEST_ASSERT_FALSE(timer.expired(1000 + 599999));
+  TEST_ASSERT_TRUE(timer.expired(1000 + 600000));
+  timer.reset(1000 + 600000);  // a button press starts it again
+  TEST_ASSERT_FALSE(timer.expired(1000 + 600001));
+
+  // Across millis() wraparound.
+  timer.reset(0xFFFFFF00u);
+  TEST_ASSERT_FALSE(timer.expired(0x100u));
+  TEST_ASSERT_TRUE(timer.expired(0xFFFFFF00u + 600000u));
+
+  timer.setTimeoutMinutes(0);
+  TEST_ASSERT_FALSE(timer.expired(0xFFFFFF00u + 600000u));
+  timer.setTimeoutMinutes(-5);
+  TEST_ASSERT_EQUAL_UINT32(0u, timer.timeoutMs());
+}
+
+void test_wallpaper_file_names() {
+  TEST_ASSERT_TRUE(isWallpaper("forest.jpg"));
+  TEST_ASSERT_TRUE(isWallpaper("Forest.JPEG"));
+  TEST_ASSERT_TRUE(isWallpaper("cat.png"));
+  TEST_ASSERT_TRUE(isWallpaper("map.bmp"));
+  TEST_ASSERT_FALSE(isWallpaper("notes.txt"));
+  TEST_ASSERT_FALSE(isWallpaper("jpg"));
+  TEST_ASSERT_FALSE(isWallpaper("._forest.jpg"));  // macOS metadata
+  TEST_ASSERT_FALSE(isWallpaper(""));
+}
+
+void test_sleep_screen_shows_a_random_wallpaper() {
+  ListingFileSystem fs;
+  fs.add("b.png");
+  fs.add("readme.txt");
+  fs.add("a.jpg");
+  fs.add("c.bmp");
+  fs.add("old.jpg", true);  // a folder
+
+  ImageDisplay display;
+  // Sorted: a.jpg, b.png, c.bmp. The random number picks one.
+  TEST_ASSERT_EQUAL_STRING("/wallpapers/a.jpg", drawSleepScreen(display, fs, 0).c_str());
+  TEST_ASSERT_EQUAL_STRING("/wallpapers/b.png", drawSleepScreen(display, fs, 1).c_str());
+  TEST_ASSERT_EQUAL_STRING("/wallpapers/c.bmp", drawSleepScreen(display, fs, 5).c_str());
+  TEST_ASSERT_FALSE(display.shows("paperOS"));
+}
+
+void test_sleep_screen_skips_images_it_cannot_draw() {
+  ListingFileSystem fs;
+  fs.add("a-broken.jpg");
+  fs.add("b.jpg");
+  ImageDisplay display;
+  TEST_ASSERT_EQUAL_STRING("/wallpapers/b.jpg", drawSleepScreen(display, fs, 0).c_str());
+  TEST_ASSERT_EQUAL_INT(2, (int)display.images.size());
+}
+
+void test_sleep_screen_without_wallpapers_shows_a_message() {
+  ListingFileSystem fs;
+  fs.hasDir = false;
+  ImageDisplay display;
+  display.beginFrame(Color::White);
+  TEST_ASSERT_EQUAL_STRING("", drawSleepScreen(display, fs, 7).c_str());
+  TEST_ASSERT_TRUE(display.shows("paperOS"));
+  TEST_ASSERT_TRUE(display.shows("Press the power button to wake"));
+
+  // Only broken images: the message too.
+  fs.hasDir = true;
+  fs.add("broken.png");
+  display.beginFrame(Color::White);
+  TEST_ASSERT_EQUAL_STRING("", drawSleepScreen(display, fs, 0).c_str());
+  TEST_ASSERT_TRUE(display.shows("paperOS"));
+
+  // A display that can't show images falls back to the message as well.
+  ListingFileSystem withImage;
+  withImage.add("a.jpg");
+  FakeDisplay plain;
+  plain.beginFrame(Color::White);
+  TEST_ASSERT_EQUAL_STRING("", drawSleepScreen(plain, withImage, 0).c_str());
+  TEST_ASSERT_TRUE(plain.shows("paperOS"));
+}
+
+void test_shell_closes_the_app_before_sleep() {
+  Shell shell;
+  CountingApp app("App");
+  shell.addApp(&app);
+  shell.closeApp();  // nothing open: no-op
+  TEST_ASSERT_EQUAL(0, app.closed);
+  shell.handle(InputEvent::Select);
+  shell.closeApp();
+  TEST_ASSERT_EQUAL(1, app.closed);
+  TEST_ASSERT_NULL(shell.activeApp());
+}
+
+void test_debug_setting() {
+  Config config;
+  TEST_ASSERT_FALSE(debugEnabled(config));
+  config.parse("[Developer]\ndebug = \"true\"\n");
+  TEST_ASSERT_TRUE(debugEnabled(config));
+  config.parse("[developer]\ndebug = yes\n");
+  TEST_ASSERT_TRUE(debugEnabled(config));
+  config.parse("[Developer]\ndebug = \"false\"\n");
+  TEST_ASSERT_FALSE(debugEnabled(config));
+}
+
+void test_log_file_starts_at_zero_and_appends() {
+  AppendFileSystem fs;
+  fs.files["/config.toml"] = "x";
+  LogFile log(fs, 100);
+  log.begin();
+  TEST_ASSERT_EQUAL_STRING("/debug.0.log", log.path().c_str());
+  TEST_ASSERT_TRUE(log.flush());  // nothing to write
+  TEST_ASSERT_EQUAL_INT(0, (int)fs.files.count("/debug.0.log"));
+
+  log.add("first");
+  log.add("second\n");
+  TEST_ASSERT_TRUE(log.flush());
+  log.add("third");
+  TEST_ASSERT_TRUE(log.flush());
+  TEST_ASSERT_EQUAL_STRING("first\nsecond\nthird\n", fs.files["/debug.0.log"].c_str());
+}
+
+void test_log_file_starts_a_new_file_when_full() {
+  AppendFileSystem fs;
+  LogFile log(fs, 20);
+  log.begin();
+  log.add("0123456789");  // 11 bytes
+  log.flush();
+  log.add("abcdefghij");  // would make 22: new file
+  log.flush();
+  TEST_ASSERT_EQUAL_STRING("0123456789\n", fs.files["/debug.0.log"].c_str());
+  TEST_ASSERT_EQUAL_STRING("abcdefghij\n", fs.files["/debug.1.log"].c_str());
+  TEST_ASSERT_EQUAL_INT(1, log.fileNumber());
+}
+
+void test_log_file_carries_on_after_a_restart() {
+  AppendFileSystem fs;
+  fs.files["/debug.0.log"] = std::string(50, 'a');
+  fs.files["/debug.2.log"] = "old\n";
+  fs.files["/debug.10.log"] = "newest\n";
+  fs.files["/debug.x.log"] = "not a log";
+  fs.files["/debugger.log"] = "nor this";
+  LogFile log(fs, 20);
+  log.begin();
+  TEST_ASSERT_EQUAL_STRING("/debug.10.log", log.path().c_str());
+  log.add("more");
+  log.flush();
+  TEST_ASSERT_EQUAL_STRING("newest\nmore\n", fs.files["/debug.10.log"].c_str());
+}
+
+void test_log_file_keeps_lines_until_the_card_works() {
+  AppendFileSystem fs;
+  fs.failWrites = true;
+  LogFile log(fs);
+  log.begin();
+  log.add("kept");
+  TEST_ASSERT_FALSE(log.flush());
+  TEST_ASSERT_TRUE(log.hasPending());
+  fs.failWrites = false;
+  TEST_ASSERT_TRUE(log.flush());
+  TEST_ASSERT_EQUAL_STRING("kept\n", fs.files["/debug.0.log"].c_str());
+
+  // Without a card, memory use is capped.
+  fs.failWrites = true;
+  for (int i = 0; i < 10000; ++i) log.add("a line that is a few dozen bytes long");
+  TEST_ASSERT_FALSE(log.flush());
+  fs.failWrites = false;
+  log.flush();
+  TEST_ASSERT_TRUE(fs.files["/debug.0.log"].size() <= LogFile::kMaxPendingBytes + 5);
+}
+
+// Feeds samples every 20 ms, like main.cpp: down for `down` ms, then up for
+// `up` ms. Returns the last non-zero count seen.
+int pressFor(PressCounter& counter, uint32_t& t, uint32_t down, uint32_t up) {
+  int result = 0;
+  for (uint32_t end = t + down; t < end; t += 20) result = counter.update(true, t) ?: result;
+  for (uint32_t end = t + up; t < end; t += 20) result = counter.update(false, t) ?: result;
+  return result;
+}
+
+void test_power_button_press_counter() {
+  PressCounter counter;
+  uint32_t t = 1000;
+  // Timings from a real double press: 105 ms down, 95 ms up, 140 ms down.
+  TEST_ASSERT_EQUAL_INT(0, pressFor(counter, t, 100, 100));
+  TEST_ASSERT_EQUAL_INT(2, pressFor(counter, t, 140, 1000));
+
+  // A single press.
+  TEST_ASSERT_EQUAL_INT(1, pressFor(counter, t, 120, 1000));
+
+  // Two presses further apart than the gap are two singles.
+  TEST_ASSERT_EQUAL_INT(1, pressFor(counter, t, 120, 600));
+  TEST_ASSERT_EQUAL_INT(1, pressFor(counter, t, 120, 1000));
+
+  // A hold isn't a press, and cancels a press just before it.
+  TEST_ASSERT_EQUAL_INT(0, pressFor(counter, t, 2000, 1000));
+  TEST_ASSERT_EQUAL_INT(0, pressFor(counter, t, 100, 100) + pressFor(counter, t, 1500, 1000));
+
+  // Three quick presses.
+  pressFor(counter, t, 100, 100);
+  pressFor(counter, t, 100, 100);
+  TEST_ASSERT_EQUAL_INT(3, pressFor(counter, t, 100, 1000));
+}
+
+void test_reads_image_sizes() {
+  int w = 0, h = 0;
+
+  // PNG 800x1200: signature, then the IHDR chunk.
+  BytesFile png(bytes({0x89, 'P', 'N', 'G', 0x0D, 0x0A, 0x1A, 0x0A, 0, 0, 0, 13, 'I', 'H', 'D', 'R',
+                       0, 0, 0x03, 0x20, 0, 0, 0x04, 0xB0, 8, 0}));
+  TEST_ASSERT_TRUE(readImageSize(png, w, h));
+  TEST_ASSERT_EQUAL_INT(800, w);
+  TEST_ASSERT_EQUAL_INT(1200, h);
+
+  // BMP 1920x1080 stored top-down (negative height).
+  std::string bmp = bytes({'B', 'M'}) + std::string(16, '\0');
+  bmp += bytes({0x80, 0x07, 0, 0, 0xC8, 0xFB, 0xFF, 0xFF});  // 1920, -1080
+  BytesFile bmpFile(bmp);
+  TEST_ASSERT_TRUE(readImageSize(bmpFile, w, h));
+  TEST_ASSERT_EQUAL_INT(1920, w);
+  TEST_ASSERT_EQUAL_INT(1080, h);
+
+  // JPEG 640x480 with an APP1 (EXIF) segment and padding before the frame.
+  std::string jpeg = bytes({0xFF, 0xD8, 0xFF, 0xE1, 0x00, 0x10}) + std::string(14, 'x');
+  jpeg += bytes({0xFF, 0xFF, 0xC4, 0x00, 0x04, 0, 0});            // padding, then DHT
+  jpeg += bytes({0xFF, 0xC2, 0x00, 0x11, 8, 0x01, 0xE0, 0x02, 0x80, 3});  // progressive SOF
+  BytesFile jpegFile(jpeg);
+  TEST_ASSERT_TRUE(readImageSize(jpegFile, w, h));
+  TEST_ASSERT_EQUAL_INT(640, w);
+  TEST_ASSERT_EQUAL_INT(480, h);
+
+  // Not an image, or cut short.
+  BytesFile text("hello, world");
+  TEST_ASSERT_FALSE(readImageSize(text, w, h));
+  BytesFile cut(bytes({0xFF, 0xD8, 0xFF, 0xE1, 0x00, 0x40}));
+  TEST_ASSERT_FALSE(readImageSize(cut, w, h));
+  BytesFile empty("");
+  TEST_ASSERT_FALSE(readImageSize(empty, w, h));
+}
+
+void test_cover_scale_fills_the_screen() {
+  // Landscape 1920x1080 on the 540x960 portrait screen: the height decides.
+  const float landscape = coverScale(1920, 1080, 540, 960);
+  TEST_ASSERT_FLOAT_WITHIN(0.0001f, 960.0f / 1080.0f, landscape);
+  TEST_ASSERT_TRUE(1920 * landscape >= 540 && 1080 * landscape >= 959.9f);
+  // A tall narrow image: the width decides.
+  TEST_ASSERT_FLOAT_WITHIN(0.0001f, 2.0f, coverScale(270, 2000, 540, 960));
+  // Exactly the screen: 1.
+  TEST_ASSERT_FLOAT_WITHIN(0.0001f, 1.0f, coverScale(540, 960, 540, 960));
+  TEST_ASSERT_EQUAL_FLOAT(0.0f, coverScale(0, 100, 540, 960));
+}
+
 int main(int, char**) {
   UNITY_BEGIN();
   RUN_TEST(test_short_press_fires_on_release);
@@ -466,5 +826,19 @@ int main(int, char**) {
   RUN_TEST(test_home_screen_shows_the_battery_level);
   RUN_TEST(test_app_can_request_a_quality_refresh);
   RUN_TEST(test_wifi_status_icon);
+  RUN_TEST(test_idle_timer);
+  RUN_TEST(test_wallpaper_file_names);
+  RUN_TEST(test_sleep_screen_shows_a_random_wallpaper);
+  RUN_TEST(test_sleep_screen_skips_images_it_cannot_draw);
+  RUN_TEST(test_sleep_screen_without_wallpapers_shows_a_message);
+  RUN_TEST(test_shell_closes_the_app_before_sleep);
+  RUN_TEST(test_power_button_press_counter);
+  RUN_TEST(test_reads_image_sizes);
+  RUN_TEST(test_cover_scale_fills_the_screen);
+  RUN_TEST(test_debug_setting);
+  RUN_TEST(test_log_file_starts_at_zero_and_appends);
+  RUN_TEST(test_log_file_starts_a_new_file_when_full);
+  RUN_TEST(test_log_file_carries_on_after_a_restart);
+  RUN_TEST(test_log_file_keeps_lines_until_the_card_works);
   return UNITY_END();
 }

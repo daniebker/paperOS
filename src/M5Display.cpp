@@ -1,4 +1,9 @@
+// SD.h first so M5GFX adds its file-drawing functions for it.
+#include <SD.h>
+
 #include "M5Display.h"
+
+#include <cstring>
 
 using paperos::Color;
 using paperos::Refresh;
@@ -40,6 +45,34 @@ void M5Display::endFrame(Refresh refresh) {
   gfx_.setEpdMode(refresh == Refresh::Quality ? epd_mode_t::epd_quality : epd_mode_t::epd_fast);
   gfx_.endWrite();
   gfx_.display();
+}
+
+bool M5Display::drawImage(const char* path) {
+  const char* dot = std::strrchr(path, '.');
+  if (dot == nullptr) return false;
+  const int w = gfx_.width();
+  const int h = gfx_.height();
+  // Scale so the image covers the screen; centring then crops the overflow
+  // evenly. If the size can't be read, 0 fits the whole image instead.
+  float scale = 0.0f;
+  int imageW = 0;
+  int imageH = 0;
+  std::unique_ptr<paperos::File> file = fs_.open(path, paperos::FileMode::Read);
+  if (file && paperos::readImageSize(*file, imageW, imageH)) {
+    scale = paperos::coverScale(imageW, imageH, w, h);
+  }
+  file.reset();
+  const auto centre = textdatum_t::middle_center;
+  if (strcasecmp(dot, ".jpg") == 0 || strcasecmp(dot, ".jpeg") == 0) {
+    return gfx_.drawJpgFile(SD, path, 0, 0, w, h, 0, 0, scale, scale, centre);
+  }
+  if (strcasecmp(dot, ".png") == 0) {
+    return gfx_.drawPngFile(SD, path, 0, 0, w, h, 0, 0, scale, scale, centre);
+  }
+  if (strcasecmp(dot, ".bmp") == 0) {
+    return gfx_.drawBmpFile(SD, path, 0, 0, w, h, 0, 0, scale, scale, centre);
+  }
+  return false;
 }
 
 void M5Display::fillRect(int x, int y, int w, int h, Color color) {

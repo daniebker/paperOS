@@ -8,6 +8,9 @@ namespace {
 
 constexpr uint32_t kSdSpiHz = 25000000;
 constexpr size_t kMaxConfigBytes = 16 * 1024;
+// A card that was just inserted, or is slow to wake, can fail the first try.
+constexpr int kMountAttempts = 3;
+constexpr uint32_t kMountRetryDelayMs = 200;
 
 bool mountSd() {
   const int cs = M5.getPin(m5::pin_name_t::sd_spi_cs);
@@ -17,14 +20,24 @@ bool mountSd() {
   }
   SPI.begin(M5.getPin(m5::pin_name_t::sd_spi_sclk), M5.getPin(m5::pin_name_t::sd_spi_miso),
             M5.getPin(m5::pin_name_t::sd_spi_mosi), cs);
-  if (!SD.begin(cs, SPI, kSdSpiHz)) {
-    M5_LOGW("SD card not mounted (missing or unreadable)");
-    return false;
+  for (int attempt = 1; attempt <= kMountAttempts; ++attempt) {
+    if (SD.begin(cs, SPI, kSdSpiHz)) return true;
+    SD.end();
+    if (attempt < kMountAttempts) delay(kMountRetryDelayMs);
   }
-  return true;
+  M5_LOGW("SD card not mounted (missing or unreadable)");
+  return false;
 }
 
 }  // namespace
+
+bool ensureSdMounted() {
+  if (SD.cardType() != CARD_NONE) return true;
+  SD.end();
+  const bool mounted = mountSd();
+  if (mounted) M5_LOGI("SD card mounted");
+  return mounted;
+}
 
 bool loadConfigFromSd(paperos::Config& config) {
   config.clear();

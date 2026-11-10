@@ -25,6 +25,12 @@ class Shell {
   // Gives the open app time to work. Returns true if the screen needs redrawing.
   bool tick();
 
+  // Closes the open app, if any, so it can save its state, and returns to
+  // the home screen. Used before the device sleeps.
+  void closeApp() {
+    if (active_ != nullptr) close();
+  }
+
   // Renders the home screen or the open app.
   void draw(Display& display);
 

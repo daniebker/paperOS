@@ -120,8 +120,7 @@ void CalendarApp::readFeeds() {
                                                                         kDefaultDays))));
   refreshMinutes_ = int(std::max<long>(
       0, config_.getInt("calendar", "refresh_minutes", kDefaultRefreshMinutes)));
-  const char* section = config_.has("Developer", "debug") ? "Developer" : "developer";
-  debug_ = config_.getBool(section, "debug", false);
+  debug_ = paperos::debugEnabled(config_);
 }
 
 void CalendarApp::onOpen() {

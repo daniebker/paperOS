@@ -4,6 +4,12 @@
 [owner]
   name = "Dan"
 
+# Switch off after this many minutes without a button press, leaving a random
+# image from /wallpapers on the screen. Double press the power button to do
+# this straight away; press it once to wake. 0 never sleeps on its own.
+[power]
+  sleep_minutes = 10
+
 # Used for the calendar and the clock. A name such as "Europe/Berlin" or
 # "America/New_York", or a POSIX TZ rule such as "CET-1CEST,M3.5.0,M10.5.0/3".
 [time]
@@ -34,4 +40,5 @@
 
 # Settings for working on paperOS.
 # [Developer]
-#   debug = "true"   # show technical detail when something fails, such as why Wi-Fi didn't connect
+#   debug = "true"   # save log messages to /debug.0.log (then debug.1.log, ...) and
+#                    # show technical detail when something fails, such as why Wi-Fi didn't connect

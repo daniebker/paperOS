@@ -6,6 +6,16 @@ All notable changes to paperOS are listed here. The format follows
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-11-11
+
+### Added
+
+- **Calendar** shows the weather forecast under each day's heading: the
+  weather, high and low temperature and chance of rain, from Open-Meteo. Set
+  the place in `[weather] latitude` and `longitude`, and optionally
+  `units = "fahrenheit"`. The forecast is downloaded with the calendars and
+  cached in `/.cache/calendar`.
+
 ## [1.1.0] - 2026-11-11
 
 ### Changed
@@ -76,6 +86,7 @@ e-paper display.
   workflow that publishes binaries when a version tag is pushed.
 - README with flashing instructions, controls and every `config.toml` setting.
 
-[Unreleased]: https://github.com/daniebker/paperOS/compare/v1.1.0...HEAD
+[Unreleased]: https://github.com/daniebker/paperOS/compare/v1.2.0...HEAD
+[1.2.0]: https://github.com/daniebker/paperOS/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/daniebker/paperOS/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/daniebker/paperOS/releases/tag/v1.0.0

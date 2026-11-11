@@ -27,6 +27,7 @@ struct Task {
   std::string title;
   std::string status;  // inbox, next, waiting, someday, reference, done, archived
   std::string projectId;
+  std::string areaId;
   std::string description;
   std::string priority;      // low, medium, high, urgent, or ""
   std::string timeEstimate;  // as written, such as "30min"
@@ -51,14 +52,28 @@ struct Task {
 struct Project {
   std::string id;
   std::string title;
+  std::string areaId;
+};
+
+struct Area {
+  std::string id;
+  std::string name;
+  double order = 0;
+  bool hasOrder = false;
+  bool deleted = false;
+  size_t position = 0;  // position in the file
 };
 
 struct Data {
   std::vector<Task> tasks;
   std::vector<Project> projects;
+  std::vector<Area> areas;
 
   // The project's title, or "" if there is none.
   const std::string& projectTitle(const std::string& id) const;
+  // The task's area: its own, or else its project's. Null if it has none, or
+  // the area is deleted or unknown.
+  const Area* areaOf(const Task& task) const;
   // The task with this id, or null.
   const Task* find(const std::string& id) const;
 };
@@ -91,7 +106,7 @@ DoneResult markDone(std::string& text, const std::string& id, int64_t nowUtc);
 // The three lists the Tasks app shows, as indexes into Data::tasks.
 struct Lists {
   std::vector<size_t> focus;     // focused today
-  std::vector<size_t> next;      // available next actions
+  std::vector<size_t> next;      // available next actions, grouped by area
   std::vector<size_t> upcoming;  // starting or due within `days`
 };
 
@@ -99,7 +114,9 @@ struct Lists {
 //   focus:    focused today, not finished, and started (or no start date);
 //                in focus order
 //   next:     status next, not focused, and started (or no start date);
-//                due ones first, earliest first, then the rest in file order
+//                grouped by area (in the areas' order, tasks without an area
+//                last), and in each area by start date, then due date,
+//                earliest first and undated last, then in file order
 //   upcoming: inbox, next or waiting, in neither list above, starting or due
 //                from today to `days` days ahead; soonest first
 // With the time unknown (nowUtc < 0), dates are ignored and upcoming is empty.

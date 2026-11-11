@@ -43,7 +43,7 @@ class TasksApp : public paperos::App {
   enum class MenuItem : uint8_t { MarkDone, Details };
 
   struct Row {
-    enum class Kind : uint8_t { Heading, Task, Empty };
+    enum class Kind : uint8_t { Heading, Subheading, Task, Empty };
     Kind kind = Kind::Task;
     std::string text;
     std::string detail;  // the line under a task's title

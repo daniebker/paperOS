@@ -436,6 +436,61 @@ void test_lists_without_the_time() {
   TEST_ASSERT_EQUAL(6, int(lists.next.size()));
 }
 
+std::string areaData() {
+  const std::vector<std::string> tasks = {
+      task("a1", "Loose", "next"),
+      task("a2", "Home due later", "next", ",\"areaId\":\"home\",\"dueDate\":\"2026-11-14\""),
+      task("a3", "Work undated", "next", ",\"areaId\":\"work\""),
+      task("a4", "Home via project", "next", ",\"projectId\":\"p1\",\"dueDate\":\"2026-11-12\""),
+      task("a5", "Home started", "next",
+           ",\"areaId\":\"home\",\"startTime\":\"2026-11-09\",\"dueDate\":\"2026-11-20\""),
+      task("a6", "Work started", "next", ",\"areaId\":\"work\",\"startTime\":\"2026-11-10\""),
+      task("a7", "Gone area", "next", ",\"areaId\":\"old\""),
+  };
+  std::string out = "{\"tasks\":[";
+  for (size_t i = 0; i < tasks.size(); ++i) out += (i ? "," : "") + tasks[i];
+  out +=
+      "],\"projects\":[{\"id\":\"p1\",\"title\":\"House\",\"areaId\":\"home\"}],"
+      "\"areas\":[{\"id\":\"work\",\"name\":\"Work\",\"order\":1},"
+      "{\"id\":\"home\",\"name\":\"Home\",\"order\":0},"
+      "{\"id\":\"old\",\"name\":\"Old\",\"order\":2,\"deletedAt\":\"2026-11-01T08:00:00.000Z\"}]}";
+  return out;
+}
+
+void test_next_actions_grouped_by_area() {
+  mindwtr::Data data;
+  std::string error;
+  TEST_ASSERT_TRUE(mindwtr::parse(areaData(), data, error));
+  TEST_ASSERT_EQUAL(3, int(data.areas.size()));
+  // Areas in their order, no area (or a deleted one) last. In each area by
+  // start date, then due date, undated last.
+  assertTitles({"Home started", "Home via project", "Home due later", "Work started",
+                "Work undated", "Loose", "Gone area"},
+               titles(data, mindwtr::buildLists(data, now(), 7).next));
+}
+
+void test_next_actions_show_area_subheadings() {
+  Harness h;
+  h.server.body = areaData();
+  h.app.onOpen();
+  h.run();
+  std::vector<std::string> rows;
+  for (const auto& row : h.app.rows()) {
+    if (row.kind == TasksApp::Row::Kind::Subheading) rows.push_back("## " + row.text);
+    if (row.kind == TasksApp::Row::Kind::Task) rows.push_back(row.text);
+  }
+  assertTitles({"## Home", "Home started", "Home via project", "Home due later", "## Work",
+                "Work started", "Work undated", "## No area", "Loose", "Gone area"},
+               rows);
+
+  // Without areas, no subheadings.
+  Harness plain;
+  plain.app.onOpen();
+  plain.run();
+  for (const auto& row : plain.app.rows())
+    TEST_ASSERT_TRUE(row.kind != TasksApp::Row::Kind::Subheading);
+}
+
 // --- Marking done ------------------------------------------------------------------
 
 void test_mark_done_changes_only_that_task() {
@@ -782,6 +837,8 @@ int main(int, char**) {
   RUN_TEST(test_iso_time_round_trips);
   RUN_TEST(test_lists_sort_tasks);
   RUN_TEST(test_lists_without_the_time);
+  RUN_TEST(test_next_actions_grouped_by_area);
+  RUN_TEST(test_next_actions_show_area_subheadings);
   RUN_TEST(test_mark_done_changes_only_that_task);
   RUN_TEST(test_mark_done_adds_missing_fields);
   RUN_TEST(test_mark_done_refuses_what_it_should);

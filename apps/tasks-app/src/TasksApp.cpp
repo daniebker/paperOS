@@ -594,7 +594,7 @@ void TasksApp::rebuildRows() {
 
   rows_.clear();
   auto addSection = [&](const char* heading, const std::vector<size_t>& tasks, bool upcoming,
-                        const char* empty) {
+                        const char* empty, bool byArea = false) {
     Row head;
     head.kind = Row::Kind::Heading;
     head.text = heading;
@@ -605,7 +605,26 @@ void TasksApp::rebuildRows() {
       none.text = empty;
       rows_.push_back(none);
     }
+    // Area subheadings, only when some of the tasks have an area.
+    if (byArea) {
+      byArea = std::any_of(tasks.begin(), tasks.end(),
+                           [&](size_t i) { return data_.areaOf(data_.tasks[i]) != nullptr; });
+    }
+    const mindwtr::Area* area = nullptr;
+    bool first = true;
     for (const size_t i : tasks) {
+      if (byArea) {
+        const mindwtr::Area* a = data_.areaOf(data_.tasks[i]);
+        if (first || a != area) {
+          Row sub;
+          sub.kind = Row::Kind::Subheading;
+          sub.text = a == nullptr ? "No area" : paperos::foldUtf8ToAscii(a->name);
+          if (sub.text.empty()) sub.text = "(untitled area)";
+          rows_.push_back(sub);
+          area = a;
+          first = false;
+        }
+      }
       Row row;
       row.kind = Row::Kind::Task;
       row.task = i;
@@ -621,7 +640,7 @@ void TasksApp::rebuildRows() {
     return;
   }
   addSection("Today's Focus", lists.focus, false, "Nothing in focus today");
-  addSection("Next Actions", lists.next, false, "No next actions");
+  addSection("Next Actions", lists.next, false, "No next actions", true);
   const std::string upcoming = "Upcoming, " + std::to_string(days_) + " days";
   addSection(upcoming.c_str(), lists.upcoming, true,
              now < 0 ? "Date unknown" : "Nothing scheduled");
@@ -659,6 +678,8 @@ int TasksApp::rowHeight(const Row& row) const {
   switch (row.kind) {
     case Row::Kind::Heading:
       return display_.textHeight(TextSize::Large) + 2 * kRowPad;
+    case Row::Kind::Subheading:
+      return display_.textHeight(TextSize::Medium) + 2 * kRowPad;
     case Row::Kind::Empty:
       return display_.textHeight(TextSize::Small) + 2 * kRowPad;
     case Row::Kind::Task:
@@ -674,8 +695,13 @@ void TasksApp::buildPages() {
   int y = bodyTop();
   for (size_t i = 0; i < rows_.size(); ++i) {
     int h = rowHeight(rows_[i]);
-    // Keep a heading with the row after it.
-    if (rows_[i].kind == Row::Kind::Heading && i + 1 < rows_.size()) h += rowHeight(rows_[i + 1]);
+    // Keep a heading with the row after it, and a heading followed by a
+    // subheading with the row after that.
+    for (size_t j = i; j + 1 < rows_.size() && (rows_[j].kind == Row::Kind::Heading ||
+                                                rows_[j].kind == Row::Kind::Subheading);
+         ++j) {
+      h += rowHeight(rows_[j + 1]);
+    }
     if (!page.empty() && y + h > bodyBottom()) {
       pages_.push_back(page);
       page.clear();
@@ -927,6 +953,11 @@ void TasksApp::drawList(paperos::Display& display) {
         case Row::Kind::Heading:
           display.drawText(row.text.c_str(), kMargin, y + kRowPad, TextSize::Large);
           display.fillRect(kMargin, y + h - 4, maxW, 2, Color::DarkGray);
+          break;
+        case Row::Kind::Subheading:
+          display.drawText(fitToWidth(display, row.text, TextSize::Medium, maxW).c_str(), kMargin,
+                           y + kRowPad, TextSize::Medium, TextAlign::Left, Color::DarkGray);
+          display.fillRect(kMargin, y + h - 3, maxW, 1, Color::LightGray);
           break;
         case Row::Kind::Empty:
           display.drawText(row.text.c_str(), kMargin, y + kRowPad, TextSize::Small,

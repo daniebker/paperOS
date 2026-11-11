@@ -329,6 +329,8 @@ bool readTask(Reader& r, Task& task) {
       ok = r.readStringOrNull(task.status);
     } else if (key == "projectId") {
       ok = r.readStringOrNull(task.projectId);
+    } else if (key == "areaId") {
+      ok = r.readStringOrNull(task.areaId);
     } else if (key == "description") {
       ok = r.readStringOrNull(task.description);
     } else if (key == "priority") {
@@ -431,6 +433,35 @@ bool readProject(Reader& r, Project& project) {
       ok = r.readStringOrNull(project.id);
     } else if (key == "title") {
       ok = r.readStringOrNull(project.title);
+    } else if (key == "areaId") {
+      ok = r.readStringOrNull(project.areaId);
+    } else {
+      ok = r.skipValue();
+    }
+    if (!ok) return r.fail();
+  }
+  return r.ok();
+}
+
+bool readArea(Reader& r, Area& area) {
+  if (!r.beginObject()) return false;
+  std::string key;
+  std::string value;
+  while (r.nextMember(key)) {
+    bool ok;
+    if (key == "id") {
+      ok = r.readStringOrNull(area.id);
+    } else if (key == "name" || (key == "title" && area.name.empty())) {
+      ok = r.readStringOrNull(area.name);
+    } else if (key == "order") {
+      ok = r.readRaw(value);
+      if (ok && value != "null") {
+        area.order = std::strtod(value.c_str(), nullptr);
+        area.hasOrder = true;
+      }
+    } else if (key == "deletedAt" || key == "purgedAt") {
+      ok = r.readStringOrNull(value);
+      if (!value.empty()) area.deleted = true;
     } else {
       ok = r.skipValue();
     }
@@ -528,6 +559,22 @@ const std::string& Data::projectTitle(const std::string& id) const {
   return kNone;
 }
 
+const Area* Data::areaOf(const Task& task) const {
+  std::string id = task.areaId;
+  if (id.empty() && !task.projectId.empty()) {
+    for (const Project& p : projects) {
+      if (p.id == task.projectId) {
+        id = p.areaId;
+        break;
+      }
+    }
+  }
+  if (id.empty()) return nullptr;
+  for (const Area& a : areas)
+    if (a.id == id) return a.deleted ? nullptr : &a;
+  return nullptr;
+}
+
 const Task* Data::find(const std::string& id) const {
   for (const Task& t : tasks)
     if (t.id == id) return &t;
@@ -537,6 +584,7 @@ const Task* Data::find(const std::string& id) const {
 bool parse(const std::string& text, Data& data, std::string& error) {
   data.tasks.clear();
   data.projects.clear();
+  data.areas.clear();
   Reader r(text);
   r.skipBom();
   if (!r.peek('{')) {
@@ -571,6 +619,19 @@ bool parse(const std::string& text, Data& data, std::string& error) {
         Project project;
         if (!readProject(r, project)) break;
         data.projects.push_back(std::move(project));
+      }
+    } else if (key == "areas" && r.peek('[')) {
+      r.beginArray();
+      while (r.nextElement()) {
+        if (!r.peek('{')) {
+          if (!r.skipValue()) break;
+          continue;
+        }
+        Area area;
+        if (!readArea(r, area)) break;
+        if (area.id.empty()) continue;
+        area.position = data.areas.size();
+        data.areas.push_back(std::move(area));
       }
     } else if (!r.skipValue()) {
       break;
@@ -737,11 +798,27 @@ Lists buildLists(const Data& data, int64_t nowUtc, int days) {
     if (x.hasFocusOrder != y.hasFocusOrder) return x.hasFocusOrder;
     return x.hasFocusOrder && x.focusOrder < y.focusOrder;
   });
+  // Earlier first, kNoTime last; 0 when equal.
+  auto compareTime = [](int64_t x, int64_t y) {
+    if (x == y) return 0;
+    if (x == kNoTime) return 1;
+    if (y == kNoTime) return -1;
+    return x < y ? -1 : 1;
+  };
+  // Areas in their order (those with one first), then file order; no area last.
+  auto areaBefore = [](const Area* x, const Area* y) {
+    if (x == y) return false;
+    if (x == nullptr || y == nullptr) return y == nullptr;
+    if (x->hasOrder != y->hasOrder) return x->hasOrder;
+    if (x->hasOrder && x->order != y->order) return x->order < y->order;
+    return x->position < y->position;
+  };
   std::stable_sort(lists.next.begin(), lists.next.end(), [&](size_t a, size_t b) {
-    const int64_t x = tasks[a].due;
-    const int64_t y = tasks[b].due;
-    if ((x == kNoTime) != (y == kNoTime)) return x != kNoTime;
-    return x != kNoTime && x < y;
+    const Area* areaA = data.areaOf(tasks[a]);
+    const Area* areaB = data.areaOf(tasks[b]);
+    if (areaA != areaB) return areaBefore(areaA, areaB);
+    if (const int c = compareTime(tasks[a].start, tasks[b].start)) return c < 0;
+    return compareTime(tasks[a].due, tasks[b].due) < 0;
   });
   std::stable_sort(lists.upcoming.begin(), lists.upcoming.end(), [&](size_t a, size_t b) {
     return upcomingTime(tasks[a], nowUtc) < upcomingTime(tasks[b], nowUtc);

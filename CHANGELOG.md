@@ -4,6 +4,21 @@ All notable changes to paperOS are listed here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+## [1.1.0] - 2026-11-11
+
+### Changed
+
+- **E-Reader** library is now a grid of book covers, three to a row, in
+  alphabetical order of title. A / B move back and forwards through the books.
+  Covers are read from each EPUB once and cached in `/books/.cache`; books
+  without a JPEG or PNG cover show their title instead.
+- **Tasks** groups Next Actions by area, under a subheading for each, in the
+  areas' order from Mindwtr, with tasks without an area last. A task without
+  an area takes its project's. In each area, tasks are sorted by start date,
+  then due date.
+
 ## [1.0.0] - 2026-11-10
 
 The first release of paperOS, an app launcher for the M5Stack PaperDIY's 4.7"
@@ -61,4 +76,6 @@ e-paper display.
   workflow that publishes binaries when a version tag is pushed.
 - README with flashing instructions, controls and every `config.toml` setting.
 
+[Unreleased]: https://github.com/daniebker/paperOS/compare/v1.1.0...HEAD
+[1.1.0]: https://github.com/daniebker/paperOS/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/daniebker/paperOS/releases/tag/v1.0.0

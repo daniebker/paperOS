@@ -20,16 +20,18 @@ Double press the **power button** to switch off, leaving a wallpaper on the scre
 
 ## E-Reader
 
-Copy `.epub` files into a `books` folder on the SD card, then open **E-Reader** from the home screen. Books are listed by title with the pages you have left.
+Copy `.epub` files into a `books` folder on the SD card, then open **E-Reader** from the home screen. The library shows the books' covers in a grid, three to a row, in alphabetical order of title. The selected book has a thick border, and its title and the pages you have left are shown under the grid.
 
 | Input        | Library              | Reading a book       | Book menu            |
 |--------------|----------------------|----------------------|----------------------|
-| Press **A**  | Move selection up    | Previous page        | Move selection up    |
-| Press **B**  | Move selection down  | Next page            | Move selection down  |
+| Press **A**  | Previous book        | Previous page        | Move selection up    |
+| Press **B**  | Next book            | Next page            | Move selection down  |
 | Hold **A**   | Open selected book   | –                    | Choose selected item |
 | Hold **B**   | Back to home screen  | Open the book menu   | Back to the book     |
 
 The home screen, library, book menu and the bottom of each page show the battery level. It's estimated from the battery voltage, so treat it as approximate; it reads high while charging. It updates when the screen redraws.
+
+Covers are read from the books the first time the library shows them, a screenful at a time, and saved on the SD card at the size of the grid. Until a cover is ready, and for books without one, the book's title is shown in its place. Moving past the last book goes to the next screen of covers, and wraps round at either end.
 
 The first time you open a book, paperOS indexes it: it extracts the text and lays it out into pages for this screen. A progress bar shows how far along it is, and holding B cancels. The result is cached on the SD card, so the book opens straight away after that.
 
@@ -48,9 +50,10 @@ There are three font sizes (Small, Medium, Large) and four line heights (100% to
 
 Good to know:
 
-- The cache lives in `/books/.cache`, along with your saved places, font size and line height. It's safe to delete, but books will need indexing again and restart from page 1, and the text settings go back to their defaults.
+- The cache lives in `/books/.cache`, along with the covers, your saved places, font size and line height. It's safe to delete, but books will need indexing again and restart from page 1, and the text settings go back to their defaults.
+- Covers must be JPEG or PNG. Progressive JPEGs can't be shown, as with wallpapers, so those books show their title instead.
 - Replacing a book with a different file starts it again from page 1.
-- Text only. Images are skipped, so books made of scanned pages show "This book has no readable text".
+- The text of a book has no images. They are skipped, so books made of scanned pages show "This book has no readable text".
 - The display fonts are ASCII-only, so curly quotes and dashes become plain ones and accents are dropped (`café` shows as `cafe`). Scripts with no ASCII equivalent, such as Cyrillic, Greek or CJK, show as `?`.
 - DRM-protected books can't be read.
 
@@ -101,7 +104,7 @@ Good to know:
 **Tasks** shows your [Mindwtr](https://mindwtr.app) tasks from the `data.json` that Mindwtr's WebDAV sync keeps in your sync folder. Set up [Sync](#sync) with the same folder, username and password as Mindwtr. The list has three parts:
 
 - **Today's Focus**: tasks you've focused for today, in Mindwtr's focus order.
-- **Next Actions**: next actions that have started, or have no start date. Ones with a due date come first, soonest first. Overdue ones say so.
+- **Next Actions**: next actions that have started, or have no start date, grouped under their area (a task without one takes its project's area). Areas follow their order in Mindwtr, and tasks without an area come last, under "No area". In each area, tasks are sorted by start date, then due date, soonest first, with undated ones last. Overdue ones say so. If none of the tasks has an area, they're shown as one list.
 - **Upcoming**: inbox, next and waiting tasks that start or are due in the coming `days` (7 by default), soonest first.
 
 Each task shows its due or start date, project and contexts underneath. Done, archived, deleted, someday and reference tasks aren't shown.

@@ -54,6 +54,21 @@ class Display {
     (void)path;
     return false;
   }
+
+  // Like drawImage(), but fills the rectangle instead of the screen.
+  virtual bool drawImageAt(const char* path, int x, int y, int w, int h) {
+    (void)path, (void)x, (void)y, (void)w, (void)h;
+    return false;
+  }
+
+  // Saves a copy of an image at `destination` as a PNG of exactly `w` x `h`,
+  // scaled to fill that size and cropped. A small copy is much quicker to
+  // draw than a large original. Returns false if the image can't be read or
+  // decoded, or the display can't do this.
+  virtual bool resizeImage(const char* source, const char* destination, int w, int h) {
+    (void)source, (void)destination, (void)w, (void)h;
+    return false;
+  }
 };
 
 }  // namespace paperos

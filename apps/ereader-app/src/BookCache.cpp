@@ -102,6 +102,53 @@ bool saveSettings(paperos::FileSystem& fs, const ReaderSettings& settings) {
   return file && file->write(record, sizeof(record)) == sizeof(record);
 }
 
+std::string coverPath(const std::string& stem) { return stem + "-cover.png"; }
+
+CoverState coverState(paperos::FileSystem& fs, const std::string& stem) {
+  std::unique_ptr<paperos::File> file =
+      fs.open(coverPath(stem).c_str(), paperos::FileMode::Read);
+  if (!file) return CoverState::Unknown;
+  return file->size() > 0 ? CoverState::Ready : CoverState::None;
+}
+
+bool buildCover(paperos::FileSystem& fs, paperos::Display& display, const std::string& bookPath,
+                const std::string& stem, int width, int height) {
+  fs.makeDir(kCacheDir);  // fails harmlessly if it exists
+  const std::string path = coverPath(stem);
+  // Kept under another name until it is complete, like the index. Both
+  // temporary names end in the image's extension, which the display goes by.
+  const std::string resized = stem + "-cover.tmp.png";
+  std::string original;
+
+  {
+    // The display decodes from a file, so the cover is copied out of the EPUB.
+    Epub epub;
+    if (epub.open(fs.open(bookPath.c_str(), paperos::FileMode::Read)) && epub.hasCover()) {
+      original = stem + "-cover.tmp" + epub.coverExtension();
+      std::unique_ptr<paperos::File> out = fs.open(original.c_str(), paperos::FileMode::Write);
+      const bool copied = out && epub.readCover([&](const uint8_t* data, size_t size) {
+        return out->write(data, size) == size;
+      });
+      out.reset();
+      if (!copied) {
+        fs.remove(original.c_str());
+        original.clear();
+      }
+    }
+  }
+
+  bool ok = false;
+  if (!original.empty()) {
+    ok = display.resizeImage(original.c_str(), resized.c_str(), width, height);
+    fs.remove(original.c_str());
+    fs.remove(path.c_str());
+    ok = ok && fs.rename(resized.c_str(), path.c_str());
+    if (!ok) fs.remove(resized.c_str());
+  }
+  if (!ok) fs.open(path.c_str(), paperos::FileMode::Write);  // empty: don't try again
+  return ok;
+}
+
 uint32_t pagesRemaining(uint32_t page, uint32_t pageCount) {
   return page + 1 < pageCount ? pageCount - page - 1 : 0;
 }

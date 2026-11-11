@@ -16,6 +16,9 @@
 // result is cached on the card, so reopening it is instant. The last page
 // read is saved on every page turn. See BookCache.h for the file formats.
 //
+// The library is a grid of covers, three to a row, in order of title. Covers
+// are read from the books one at a time in tick() and cached on the card.
+//
 // In the library A / B move, hold A opens and hold B returns home. In a book
 // A / B turn pages and hold B opens the menu, where A / B move, hold A selects
 // and hold B returns to the book.
@@ -32,12 +35,14 @@ class EReaderApp : public paperos::App {
     std::string fileName;
     std::string title;  // from the index, or the file name until indexed
     std::string stem;   // see ereader::cacheStem()
+    std::string cover;  // image to draw in the library; "" for none, or not yet
+    bool coverPending = false;  // the book hasn't been searched for a cover yet
     uint32_t page = 0;
     uint32_t pageCount = 0;  // 0 until indexed
   };
 
-  EReaderApp(paperos::FileSystem& fs, const paperos::Display& display,
-             const paperos::Battery& battery);
+  // `display` is used to measure text, and to scale covers down.
+  EReaderApp(paperos::FileSystem& fs, paperos::Display& display, const paperos::Battery& battery);
 
   const char* name() const override { return "E-Reader"; }
   void onOpen() override;
@@ -61,7 +66,24 @@ class EReaderApp : public paperos::App {
   uint32_t pagesLeft() const { return ereader::pagesRemaining(page_, pageCount()); }
   uint32_t layoutFingerprint() const { return fingerprint_; }
 
+  // Books on one screen of the library.
+  size_t booksPerScreen() const { return libraryGrid().perScreen; }
+
  private:
+  // Where the library's covers go on this screen.
+  struct LibraryGrid {
+    int top = 0;       // of the first row
+    int columnW = 0;   // covers are centred in their column
+    int coverW = 0;
+    int coverH = 0;
+    int detailY = 0;   // top of the selected book's title, under the grid
+    size_t perScreen = 0;
+  };
+
+  LibraryGrid libraryGrid() const;
+  bool loadNextCover();
+  void drawCover(paperos::Display& display, const Book& book, int x, int y, int w, int h) const;
+
   ereader::PageMetrics metricsFor(size_t fontLevel, size_t lineLevel) const;
   void applyStyle(size_t fontLevel, size_t lineLevel);
   void scanLibrary();
@@ -91,7 +113,7 @@ class EReaderApp : public paperos::App {
   void drawError(paperos::Display& display);
 
   paperos::FileSystem& fs_;
-  const paperos::Display& display_;
+  paperos::Display& display_;
   const paperos::Battery& battery_;
   size_t fontLevel_ = 0;
   size_t lineLevel_ = 0;
@@ -102,6 +124,8 @@ class EReaderApp : public paperos::App {
   std::vector<Book> books_;
   bool libraryAvailable_ = false;
   size_t selected_ = 0;
+  bool coversPending_ = false;  // some book still has coverPending set
+  bool coversChanged_ = false;  // a cover on screen was found since the last draw
   MenuItem menuItem_ = MenuItem::FontSize;
 
   // Values being tried in the preview, applied only when confirmed.

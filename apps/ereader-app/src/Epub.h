@@ -9,7 +9,8 @@
 
 namespace ereader {
 
-// An EPUB (2 or 3) file: its title, author and chapters in reading order.
+// An EPUB (2 or 3) file: its title, author, cover and chapters in reading
+// order.
 class Epub {
  public:
   // Follows META-INF/container.xml to the package document and reads it.
@@ -25,11 +26,22 @@ class Epub {
   // Streams a chapter's XHTML to `sink`.
   bool readChapter(size_t index, const ByteSink& sink);
 
+  // The cover is the image the package marks as one (EPUB 3 "cover-image",
+  // or the EPUB 2 "cover" meta), or failing that one named like a cover. Only
+  // JPEG and PNG covers count.
+  bool hasCover() const { return !coverExtension_.empty(); }
+  // ".jpg" or ".png", or "" without a cover.
+  const std::string& coverExtension() const { return coverExtension_; }
+  // Streams the cover's image file to `sink`.
+  bool readCover(const ByteSink& sink);
+
  private:
   bool parsePackage(const std::string& packagePath, const std::string& xml);
 
   ZipArchive zip_;
   std::vector<ZipEntry> chapters_;
+  ZipEntry cover_;
+  std::string coverExtension_;
   std::string title_;
   std::string author_;
 };

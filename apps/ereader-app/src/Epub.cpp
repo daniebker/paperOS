@@ -115,7 +115,52 @@ struct ManifestItem {
   std::string id;
   std::string href;
   std::string mediaType;
+  std::string properties;
 };
+
+// File extension for an image the display can draw, or "" for anything else.
+const char* imageExtension(const ManifestItem& item) {
+  if (item.mediaType == "image/jpeg" || item.mediaType == "image/jpg") return ".jpg";
+  if (item.mediaType == "image/png") return ".png";
+  return "";
+}
+
+// Whether a space-separated list, such as a properties attribute, has `token`.
+bool hasToken(const std::string& list, const char* token) {
+  const size_t size = strlen(token);
+  size_t pos = 0;
+  while ((pos = list.find(token, pos)) != std::string::npos) {
+    const bool starts = pos == 0 || isspace(uint8_t(list[pos - 1]));
+    const bool ends = pos + size == list.size() || isspace(uint8_t(list[pos + size]));
+    if (starts && ends) return true;
+    pos += size;
+  }
+  return false;
+}
+
+bool mentionsCover(std::string text) {
+  for (char& c : text) c = char(tolower(uint8_t(c)));
+  return text.find("cover") != std::string::npos;
+}
+
+// The manifest's cover image, or nullptr. `coverId` is the item named by an
+// EPUB 2 <meta name="cover">, "" if there is none.
+const ManifestItem* findCover(const std::vector<ManifestItem>& manifest,
+                              const std::string& coverId) {
+  for (const ManifestItem& item : manifest) {
+    if (hasToken(item.properties, "cover-image") && imageExtension(item)[0] != 0) return &item;
+  }
+  for (const ManifestItem& item : manifest) {
+    if (!coverId.empty() && item.id == coverId && imageExtension(item)[0] != 0) return &item;
+  }
+  // Books that mark it neither way still tend to call it "cover".
+  for (const ManifestItem& item : manifest) {
+    if (imageExtension(item)[0] != 0 && (mentionsCover(item.id) || mentionsCover(item.href))) {
+      return &item;
+    }
+  }
+  return nullptr;
+}
 
 }  // namespace
 
@@ -150,6 +195,7 @@ bool Epub::open(std::unique_ptr<paperos::File> file) {
   chapters_.clear();
   title_.clear();
   author_.clear();
+  coverExtension_.clear();
   if (!zip_.open(std::move(file))) return false;
 
   const ZipEntry* container = zip_.find("META-INF/container.xml");
@@ -172,6 +218,7 @@ bool Epub::open(std::unique_ptr<paperos::File> file) {
 bool Epub::parsePackage(const std::string& packagePath, const std::string& xml) {
   std::vector<ManifestItem> manifest;
   std::vector<std::string> spine;
+  std::string coverId;
 
   size_t pos = 0;
   XmlTag tag;
@@ -179,7 +226,9 @@ bool Epub::parsePackage(const std::string& packagePath, const std::string& xml) 
     if (tag.closing) continue;
     if (tag.name == "item") {
       manifest.push_back({attribute(tag, "id"), attribute(tag, "href"),
-                          attribute(tag, "media-type")});
+                          attribute(tag, "media-type"), attribute(tag, "properties")});
+    } else if (tag.name == "meta") {
+      if (attribute(tag, "name") == "cover") coverId = attribute(tag, "content");
     } else if (tag.name == "itemref") {
       // Non-linear items are auxiliary, such as pop-up notes.
       if (attribute(tag, "linear") != "no") spine.push_back(attribute(tag, "idref"));
@@ -205,8 +254,18 @@ bool Epub::parsePackage(const std::string& packagePath, const std::string& xml) 
       break;
     }
   }
+
+  if (const ManifestItem* item = findCover(manifest, coverId)) {
+    const ZipEntry* entry = zip_.find(resolveHref(packagePath, item->href));
+    if (entry != nullptr) {
+      cover_ = *entry;
+      coverExtension_ = imageExtension(*item);
+    }
+  }
   return !chapters_.empty();
 }
+
+bool Epub::readCover(const ByteSink& sink) { return hasCover() && zip_.read(cover_, sink); }
 
 bool Epub::readChapter(size_t index, const ByteSink& sink) {
   return zip_.read(chapters_[index], sink);

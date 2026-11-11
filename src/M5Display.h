@@ -23,6 +23,8 @@ class M5Display : public paperos::Display {
   int textHeight(paperos::TextSize size) const override;
   int textWidth(const char* text, paperos::TextSize size) const override;
   bool drawImage(const char* path) override;
+  bool drawImageAt(const char* path, int x, int y, int w, int h) override;
+  bool resizeImage(const char* source, const char* destination, int w, int h) override;
 
  private:
   M5GFX& gfx_;

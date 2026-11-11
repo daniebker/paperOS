@@ -17,6 +17,10 @@ namespace {
 
 constexpr int kMargin = 24;
 constexpr int kFooterGap = 16;
+constexpr int kLibraryColumns = 3;
+constexpr int kCoverGap = 16;         // between covers, both ways
+constexpr int kSelectionBorder = 5;   // drawn in the gap around the cover
+constexpr int kPlaceholderPadding = 6;
 constexpr int kPreviewRowGap = 4;
 constexpr int kProgressRedrawStep = 10;  // percent; e-paper redraws are slow
 // Fast updates ghost, so clear the panel every so often.
@@ -77,6 +81,33 @@ std::string fitToWidth(const paperos::Display& display, std::string text, TextSi
   return text + "...";
 }
 
+// Breaks `text` between words into at most `maxLines` lines that fit in
+// `maxWidth`, ending with "..." if it doesn't all fit.
+std::vector<std::string> wrapToLines(const paperos::Display& display, const std::string& text,
+                                     TextSize size, int maxWidth, size_t maxLines) {
+  std::vector<std::string> lines;
+  std::string line;
+  size_t pos = 0;
+  while (pos < text.size() && lines.size() < maxLines) {
+    size_t end = text.find(' ', pos);
+    if (end == std::string::npos) end = text.size();
+    const std::string word = text.substr(pos, end - pos);
+    const std::string longer = line.empty() ? word : line + " " + word;
+    // A word too wide for a line of its own is shortened below.
+    if (line.empty() || display.textWidth(longer.c_str(), size) <= maxWidth) {
+      line = longer;
+      pos = end + 1;
+    } else {
+      lines.push_back(line);
+      line.clear();
+    }
+  }
+  if (!line.empty()) lines.push_back(line);
+  if (pos < text.size() && !lines.empty()) lines.back() += "...";
+  for (std::string& fitted : lines) fitted = fitToWidth(display, fitted, size, maxWidth);
+  return lines;
+}
+
 std::string progressText(const EReaderApp::Book& book) {
   if (book.pageCount == 0) return "Not indexed yet";
   const uint32_t left = ereader::pagesRemaining(book.page, book.pageCount);
@@ -94,7 +125,7 @@ void drawFooterLegend(paperos::Display& display, const char* legend) {
 
 }  // namespace
 
-EReaderApp::EReaderApp(paperos::FileSystem& fs, const paperos::Display& display,
+EReaderApp::EReaderApp(paperos::FileSystem& fs, paperos::Display& display,
                        const paperos::Battery& battery)
     : fs_(fs), display_(display), battery_(battery) {
   applyStyle(0, 0);
@@ -137,6 +168,7 @@ void EReaderApp::onClose() { closeBook(); }
 
 void EReaderApp::scanLibrary() {
   books_.clear();
+  coversPending_ = false;
   std::vector<DirEntry> entries;
   libraryAvailable_ = fs_.list(ereader::kBooksDir, entries);
 
@@ -155,9 +187,67 @@ void EReaderApp::scanLibrary() {
       book.pageCount = pages.pageCount();
       book.page = pages.pageAt(ereader::loadPosition(fs_, book.stem));
     }
+
+    switch (ereader::coverState(fs_, book.stem)) {
+      case ereader::CoverState::Ready: book.cover = ereader::coverPath(book.stem); break;
+      case ereader::CoverState::None: break;
+      case ereader::CoverState::Unknown: book.coverPending = coversPending_ = true; break;
+    }
     books_.push_back(std::move(book));
   }
   std::sort(books_.begin(), books_.end(), titleLess);
+}
+
+EReaderApp::LibraryGrid EReaderApp::libraryGrid() const {
+  const int smallH = display_.textHeight(TextSize::Small);
+  LibraryGrid grid;
+  grid.top = kMargin * 3 + display_.textHeight(TextSize::Title);
+  // Under the grid: the selected book's title and progress, then the legend.
+  const int legendTop = display_.height() - kMargin - smallH - 12;
+  grid.detailY = legendTop - 12 - display_.textHeight(TextSize::Medium) - 4 - smallH;
+
+  grid.columnW = (display_.width() - 2 * kMargin - (kLibraryColumns - 1) * kCoverGap) /
+                 kLibraryColumns;
+  // Covers are 2:3, like most books. As many rows as come closest to filling
+  // the screen with covers a column wide, which are then shrunk to fit.
+  const int idealH = grid.columnW * 3 / 2;
+  const int space = grid.detailY - grid.top;
+  const int rows = std::max(1, (space + idealH / 2) / (idealH + kCoverGap));
+  grid.coverH = std::max(1, std::min(idealH, space / rows - kCoverGap));
+  grid.coverW = std::max(1, std::min(grid.columnW, grid.coverH * 2 / 3));
+  grid.perScreen = size_t(rows) * kLibraryColumns;
+  return grid;
+}
+
+// Looks for the cover of one book that hasn't been searched yet, starting
+// with those on screen. Returns true when the screen should be redrawn: once
+// every book on it has been searched, so the covers appear together.
+bool EReaderApp::loadNextCover() {
+  if (!coversPending_) return false;
+  const LibraryGrid grid = libraryGrid();
+  const size_t first = selected_ / grid.perScreen * grid.perScreen;
+  const size_t last = std::min(first + grid.perScreen, books_.size());
+  const auto nextPending = [this](size_t from, size_t to) {
+    while (from < to && !books_[from].coverPending) ++from;
+    return from;
+  };
+
+  size_t index = nextPending(first, last);
+  const bool onScreen = index < last;
+  if (!onScreen) index = nextPending(0, books_.size());
+  if (index >= books_.size()) {
+    coversPending_ = false;
+    return false;
+  }
+
+  Book& book = books_[index];
+  book.coverPending = false;
+  const std::string path = std::string(ereader::kBooksDir) + "/" + book.fileName;
+  if (ereader::buildCover(fs_, display_, path, book.stem, grid.coverW, grid.coverH)) {
+    book.cover = ereader::coverPath(book.stem);
+    if (onScreen) coversChanged_ = true;
+  }
+  return onScreen && coversChanged_ && nextPending(first, last) == last;
 }
 
 void EReaderApp::openSelected() {
@@ -389,6 +479,7 @@ bool EReaderApp::onInput(InputEvent event) {
 }
 
 bool EReaderApp::tick() {
+  if (view_ == View::Library) return loadNextCover();
   if (view_ != View::Indexing) return false;
 
   switch (indexer_->step()) {
@@ -424,7 +515,6 @@ void EReaderApp::draw(paperos::Display& display) {
 
 void EReaderApp::drawLibrary(paperos::Display& display) {
   const int w = display.width();
-  const int h = display.height();
 
   const int titleH = display.textHeight(TextSize::Title);
   display.drawText("Books", kMargin, kMargin, TextSize::Title);
@@ -450,26 +540,49 @@ void EReaderApp::drawLibrary(paperos::Display& display) {
   }
 
   // One screenful at a time, which keeps redraws to a minimum on e-paper.
-  const int titleRowH = display.textHeight(TextSize::Medium);
-  const int detailRowH = display.textHeight(TextSize::Small);
-  const int rowH = titleRowH + detailRowH + 24;
-  const int bottom = h - kMargin - detailRowH - 24;
-  const size_t rowsPerScreen = size_t(std::max(1, (bottom - top) / (rowH + 8)));
-  const size_t first = selected_ / rowsPerScreen * rowsPerScreen;
-  const size_t last = std::min(first + rowsPerScreen, books_.size());
-
-  int y = top;
+  const LibraryGrid grid = libraryGrid();
+  const size_t first = selected_ / grid.perScreen * grid.perScreen;
+  const size_t last = std::min(first + grid.perScreen, books_.size());
   for (size_t i = first; i < last; ++i) {
-    const bool selected = i == selected_;
-    if (selected) display.fillRect(kMargin / 2, y, w - kMargin, rowH, Color::Black);
-    const std::string title =
-        fitToWidth(display, books_[i].title, TextSize::Medium, w - kMargin * 3);
-    display.drawText(title.c_str(), kMargin * 3 / 2, y + 8, TextSize::Medium, TextAlign::Left,
-                     selected ? Color::White : Color::Black);
-    display.drawText(progressText(books_[i]).c_str(), kMargin * 3 / 2, y + 8 + titleRowH + 4,
-                     TextSize::Small, TextAlign::Left,
-                     selected ? Color::LightGray : Color::DarkGray);
-    y += rowH + 8;
+    const int column = int(i - first) % kLibraryColumns;
+    const int row = int(i - first) / kLibraryColumns;
+    const int x = kMargin + column * (grid.columnW + kCoverGap) + (grid.columnW - grid.coverW) / 2;
+    const int y = grid.top + row * (grid.coverH + kCoverGap);
+    if (i == selected_) {
+      display.fillRect(x - kSelectionBorder, y - kSelectionBorder,
+                       grid.coverW + 2 * kSelectionBorder, grid.coverH + 2 * kSelectionBorder,
+                       Color::Black);
+    }
+    drawCover(display, books_[i], x, y, grid.coverW, grid.coverH);
+    if (i != selected_) {
+      display.drawRect(x - 1, y - 1, grid.coverW + 2, grid.coverH + 2, Color::DarkGray);
+    }
+  }
+  coversChanged_ = false;
+
+  const Book& book = books_[selected_];
+  const std::string title = fitToWidth(display, book.title, TextSize::Medium, w - 2 * kMargin);
+  display.drawText(title.c_str(), w / 2, grid.detailY, TextSize::Medium, TextAlign::Center);
+  display.drawText(progressText(book).c_str(), w / 2,
+                   grid.detailY + display.textHeight(TextSize::Medium) + 4, TextSize::Small,
+                   TextAlign::Center, Color::DarkGray);
+}
+
+// The book's cover, or its title in a blank box if it has none that can be
+// drawn.
+void EReaderApp::drawCover(paperos::Display& display, const Book& book, int x, int y, int w,
+                           int h) const {
+  if (!book.cover.empty() && display.drawImageAt(book.cover.c_str(), x, y, w, h)) return;
+
+  display.fillRect(x, y, w, h, Color::White);
+  const int lineH = display.textHeight(TextSize::Small);
+  const std::vector<std::string> lines =
+      wrapToLines(display, book.title, TextSize::Small, w - 2 * kPlaceholderPadding,
+                  size_t(std::max(1, (h - 2 * kPlaceholderPadding) / lineH)));
+  int lineY = y + (h - int(lines.size()) * lineH) / 2;
+  for (const std::string& line : lines) {
+    display.drawText(line.c_str(), x + w / 2, lineY, TextSize::Small, TextAlign::Center);
+    lineY += lineH;
   }
 }
 

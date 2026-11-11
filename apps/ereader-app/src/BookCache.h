@@ -22,6 +22,8 @@ constexpr const char* kSettingsPath = "/books/.cache/settings.bin";
 //                        layout, so going back to a font size already used
 //                        needs no re-indexing.
 //   <stem>.pos           the place last read, which applies to every layout
+//   <stem>-cover.png     the cover, scaled down for the library; empty if the
+//                        book has no cover that can be shown
 // Reading a page from the .idx is a single seek, so page turns never touch
 // the EPUB. The index is written under a temporary name and renamed once it
 // is complete, so a power cut can't leave a partial one behind.
@@ -30,7 +32,8 @@ constexpr const char* kSettingsPath = "/books/.cache/settings.bin";
 // Reading progress must survive firmware updates, which leave the SD card
 // alone. So .pos files, the settings file and cacheStem() are frozen: a new
 // firmware has to keep reading what older ones wrote, and test_ereader pins
-// their exact bytes. Indexes can change freely, as they can be rebuilt.
+// their exact bytes. Indexes and covers can change freely, as they can be
+// rebuilt.
 
 // Stored at the very end of an .idx file.
 struct IndexFooter {
@@ -73,6 +76,22 @@ struct ReaderSettings {
 // The defaults if nothing has been saved.
 ReaderSettings loadSettings(paperos::FileSystem& fs);
 bool saveSettings(paperos::FileSystem& fs, const ReaderSettings& settings);
+
+std::string coverPath(const std::string& stem);
+
+enum class CoverState : uint8_t {
+  Unknown,  // not looked for yet; see buildCover()
+  None,     // the book has no cover that can be shown
+  Ready,    // coverPath() is an image
+};
+CoverState coverState(paperos::FileSystem& fs, const std::string& stem);
+
+// Finds the cover in the EPUB at `bookPath` and saves it at coverPath(),
+// scaled and cropped to `width` x `height`. Drawing that is far quicker than
+// decoding the full-size cover each time. Returns false, leaving an empty
+// file so it isn't tried again, if there is no cover or it can't be decoded.
+bool buildCover(paperos::FileSystem& fs, paperos::Display& display, const std::string& bookPath,
+                const std::string& stem, int width, int height);
 
 // Pages left after `page` (zero-based), so 0 on the last page.
 uint32_t pagesRemaining(uint32_t page, uint32_t pageCount);

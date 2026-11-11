@@ -31,7 +31,10 @@ class FakeDisplay : public Display {
   FakeDisplay(int w = 540, int h = 960) : w_(w), h_(h) {}
   int width() const override { return w_; }
   int height() const override { return h_; }
-  void beginFrame(Color) override { texts.clear(); }
+  void beginFrame(Color) override {
+    texts.clear();
+    images.clear();
+  }
   void endFrame(Refresh refresh) override { lastRefresh = refresh; }
   void fillRect(int, int, int, int, Color) override {}
   void drawRect(int, int, int, int, Color) override {}
@@ -47,6 +50,27 @@ class FakeDisplay : public Display {
     return perChar * int(strlen(text));
   }
 
+  // Images work only once `storage` is set. An image is drawable if its file
+  // has content, and can be resized unless that content starts with "bad".
+  bool drawImageAt(const char* path, int, int, int w, int) override {
+    if (storage == nullptr) return false;
+    std::unique_ptr<File> file = storage->open(path, FileMode::Read);
+    if (!file || file->size() == 0) return false;
+    images.emplace_back(path);
+    imageWidth = w;
+    return true;
+  }
+  bool resizeImage(const char* source, const char* destination, int w, int h) override {
+    if (storage == nullptr) return false;
+    std::unique_ptr<File> in = storage->open(source, FileMode::Read);
+    char start[3] = {};
+    if (!in || in->read(start, 3) != 3 || memcmp(start, "bad", 3) == 0) return false;
+    resizedFrom.emplace_back(source);
+    const std::string png = "png " + std::to_string(w) + "x" + std::to_string(h);
+    std::unique_ptr<File> out = storage->open(destination, FileMode::Write);
+    return out && out->write(png.data(), png.size()) == png.size();
+  }
+
   bool shows(const std::string& text) const {
     return std::find(texts.begin(), texts.end(), text) != texts.end();
   }
@@ -57,6 +81,10 @@ class FakeDisplay : public Display {
   }
 
   std::vector<std::string> texts;
+  std::vector<std::string> images;       // paths drawn this frame
+  std::vector<std::string> resizedFrom;  // every source passed to resizeImage()
+  int imageWidth = 0;
+  FileSystem* storage = nullptr;
   Refresh lastRefresh = Refresh::Fast;
 
  private:
@@ -287,6 +315,41 @@ std::string makeEpub(int paragraphs = 40) {
                   uint32_t(strlen("<html><body><h1>Deflated</h1><p>Caf\xC3\xA9 "
                                   "\xE2\x80\x9Cquoted\xE2\x80\x9D text.</p></body></html>")));
   return zip.finish();
+}
+
+// A minimal EPUB whose package has the given metadata and manifest items, plus
+// one chapter. Every image it could name is in the archive.
+std::string makeEpubWith(const std::string& metadata, const std::string& items) {
+  ZipBuilder zip;
+  zip.addStored("META-INF/container.xml", kContainer);
+  zip.addStored("OEBPS/content.opf",
+                "<package><metadata><dc:title>Covered</dc:title>" + metadata +
+                    "</metadata><manifest>"
+                    "<item id='ch' href='ch.xhtml' media-type='application/xhtml+xml'/>" +
+                    items + "</manifest><spine><itemref idref='ch'/></spine></package>");
+  zip.addStored("OEBPS/ch.xhtml", chapterText("alpha", 2));
+  zip.addStored("OEBPS/images/front.png", "front png");
+  zip.addStored("OEBPS/images/other.jpg", "other jpg");
+  zip.addStored("OEBPS/images/art.svg", "<svg/>");
+  zip.addStored("OEBPS/bad.jpg", "bad image data");
+  return zip.finish();
+}
+
+std::string readCover(Epub& epub) {
+  std::string cover;
+  epub.readCover([&](const uint8_t* bytes, size_t size) {
+    cover.append(reinterpret_cast<const char*>(bytes), size);
+    return true;
+  });
+  return cover;
+}
+
+// Runs the library's background work until every cover has been looked for.
+// Returns how many times the app asked for a redraw.
+int loadCovers(EReaderApp& app) {
+  int redraws = 0;
+  for (size_t i = 0; i <= app.books().size(); ++i) redraws += app.tick() ? 1 : 0;
+  return redraws;
 }
 
 // Records everything the parser produces, with markers for structure.
@@ -668,6 +731,64 @@ void test_epub_rejects_missing_parts() {
   TEST_ASSERT_FALSE(epub.open(memoryFile(c)));
 }
 
+void test_epub_finds_the_cover_image() {
+  const std::string front = "<item id='img1' href='images/front.png' media-type='image/png'";
+  const std::string other = "<item id='img2' href='images/other.jpg' media-type='image/jpeg'/>";
+  Epub epub;
+
+  // EPUB 3: the manifest item with the cover-image property.
+  std::string epub3 = makeEpubWith("", other + front + " properties='svg cover-image'/>");
+  TEST_ASSERT_TRUE(epub.open(memoryFile(epub3)));
+  TEST_ASSERT_TRUE(epub.hasCover());
+  TEST_ASSERT_EQUAL_STRING(".png", epub.coverExtension().c_str());
+  TEST_ASSERT_EQUAL_STRING("front png", readCover(epub).c_str());
+
+  // EPUB 2: a meta element naming the item, which wins over a likely name.
+  std::string epub2 = makeEpubWith(
+      "<meta content='img2' name='cover'/>",
+      "<item id='cover-page' href='images/front.png' media-type='image/png'/>" + other);
+  TEST_ASSERT_TRUE(epub.open(memoryFile(epub2)));
+  TEST_ASSERT_EQUAL_STRING(".jpg", epub.coverExtension().c_str());
+  TEST_ASSERT_EQUAL_STRING("other jpg", readCover(epub).c_str());
+
+  // Neither: an image that is named like a cover.
+  std::string named = makeEpubWith(
+      "", other + "<item id='x' href='images/front.png' media-type='image/png'/>"
+                  "<item id='Cover' href='bad.jpg' media-type='image/jpeg'/>");
+  TEST_ASSERT_TRUE(epub.open(memoryFile(named)));
+  TEST_ASSERT_EQUAL_STRING("bad image data", readCover(epub).c_str());
+}
+
+void test_epub_without_a_usable_cover_has_none() {
+  Epub epub;
+  std::string none = makeEpubWith(
+      "", "<item id='img2' href='images/other.jpg' media-type='image/jpeg'/>");
+  TEST_ASSERT_TRUE(epub.open(memoryFile(none)));
+  TEST_ASSERT_FALSE(epub.hasCover());
+  TEST_ASSERT_FALSE(epub.readCover([](const uint8_t*, size_t) { return true; }));
+
+  // Formats the display can't draw, a cover page rather than an image, and a
+  // cover that isn't in the archive.
+  std::string svg = makeEpubWith(
+      "<meta name='cover' content='c'/>",
+      "<item id='c' href='images/art.svg' media-type='image/svg+xml' properties='cover-image'/>"
+      "<item id='cover' href='ch.xhtml' media-type='application/xhtml+xml'/>");
+  TEST_ASSERT_TRUE(epub.open(memoryFile(svg)));
+  TEST_ASSERT_FALSE(epub.hasCover());
+
+  std::string missing = makeEpubWith(
+      "", "<item id='c' href='gone.jpg' media-type='image/jpeg' properties='cover-image'/>");
+  TEST_ASSERT_TRUE(epub.open(memoryFile(missing)));
+  TEST_ASSERT_FALSE(epub.hasCover());
+
+  // Opening another book forgets the last one's cover.
+  std::string with = makeEpub(2);
+  TEST_ASSERT_TRUE(epub.open(memoryFile(with)));
+  TEST_ASSERT_TRUE(epub.hasCover());
+  TEST_ASSERT_TRUE(epub.open(memoryFile(none)));
+  TEST_ASSERT_FALSE(epub.hasCover());
+}
+
 void test_pages_remaining() {
   TEST_ASSERT_EQUAL(339, pagesRemaining(0, 340));
   TEST_ASSERT_EQUAL(1, pagesRemaining(338, 340));
@@ -719,6 +840,133 @@ void test_library_scrolls_a_screen_at_a_time() {
   app.draw(f.display);
   TEST_ASSERT_TRUE(f.display.shows("39"));
   TEST_ASSERT_FALSE(f.display.shows("10"));
+}
+
+void test_library_is_a_grid_of_three_columns() {
+  Fixture f;
+  f.fs.files.clear();
+  for (int i = 10; i < 40; ++i) f.fs.files["/books/" + std::to_string(i) + ".epub"] = "x";
+  EReaderApp app(f.fs, f.display, f.battery);
+  app.onOpen();
+  TEST_ASSERT_EQUAL(0, app.booksPerScreen() % 3);
+  TEST_ASSERT_EQUAL(9, app.booksPerScreen());  // on the 540x960 screen
+
+  // B moves forwards through the books and A backwards, row after row.
+  app.draw(f.display);
+  TEST_ASSERT_TRUE(f.display.shows("18"));
+  TEST_ASSERT_FALSE(f.display.shows("19"));
+  for (int i = 0; i < 9; ++i) TEST_ASSERT_TRUE(app.onInput(InputEvent::Next));
+  f.display.beginFrame(Color::White);
+  app.draw(f.display);
+  TEST_ASSERT_TRUE(f.display.shows("19"));
+  TEST_ASSERT_FALSE(f.display.shows("18"));
+  TEST_ASSERT_TRUE(app.onInput(InputEvent::Previous));
+  TEST_ASSERT_EQUAL(8, app.selectedIndex());
+}
+
+void test_library_shows_covers_once_they_are_cached() {
+  Fixture f;
+  f.display.storage = &f.fs;
+  f.fs.files["/books/second.epub"] = makeEpub(3);
+  EReaderApp app(f.fs, f.display, f.battery);
+  app.onOpen();
+
+  // Nothing is read from the books until the app is idle.
+  app.draw(f.display);
+  TEST_ASSERT_EQUAL(0, f.display.images.size());
+  TEST_ASSERT_EQUAL(0, f.fs.countFiles("-cover.png"));
+
+  // One redraw, when both covers on screen are ready.
+  TEST_ASSERT_EQUAL(1, loadCovers(app));
+  TEST_ASSERT_EQUAL(2, f.fs.countFiles("-cover.png"));
+  TEST_ASSERT_EQUAL(0, f.fs.countFiles(".jpg"));  // the full-size copies are gone
+  TEST_ASSERT_EQUAL(2, f.display.resizedFrom.size());
+  TEST_ASSERT_NOT_EQUAL(std::string::npos, f.display.resizedFrom[0].find(".jpg"));
+
+  f.display.beginFrame(Color::White);
+  app.draw(f.display);
+  TEST_ASSERT_EQUAL(2, f.display.images.size());
+  TEST_ASSERT_EQUAL_STRING(app.books()[0].cover.c_str(), f.display.images[0].c_str());
+  TEST_ASSERT_LESS_OR_EQUAL((540 - 2 * 24) / 3, f.display.imageWidth);
+  // The cover stands in for the title, which shows only for the selection.
+  TEST_ASSERT_EQUAL(1, std::count(f.display.texts.begin(), f.display.texts.end(), "book"));
+  TEST_ASSERT_FALSE(f.display.shows("second"));
+  TEST_ASSERT_FALSE(app.tick());
+
+  // Reopening uses the cached covers without opening the books.
+  const int opens = f.fs.opens[kBookPath];
+  app.onClose();
+  app.onOpen();
+  TEST_ASSERT_EQUAL(0, loadCovers(app));
+  f.display.beginFrame(Color::White);
+  app.draw(f.display);
+  TEST_ASSERT_EQUAL(2, f.display.images.size());
+  TEST_ASSERT_EQUAL(opens, f.fs.opens[kBookPath]);
+  TEST_ASSERT_EQUAL(2, f.display.resizedFrom.size());
+}
+
+void test_books_without_a_cover_show_their_title_and_are_not_retried() {
+  Fixture f;
+  f.display.storage = &f.fs;
+  f.fs.files.clear();
+  f.fs.files["/books/plain.epub"] = makeEpubWith("", "");
+  f.fs.files["/books/broken.epub"] = "not a zip";
+  f.fs.files["/books/undecodable.epub"] = makeEpubWith(
+      "", "<item id='c' href='bad.jpg' media-type='image/jpeg' properties='cover-image'/>");
+  EReaderApp app(f.fs, f.display, f.battery);
+  app.onOpen();
+  TEST_ASSERT_EQUAL(0, loadCovers(app));  // nothing new to draw
+
+  app.draw(f.display);
+  TEST_ASSERT_EQUAL(0, f.display.images.size());
+  TEST_ASSERT_TRUE(f.display.shows("plain"));
+  TEST_ASSERT_TRUE(f.display.shows("broken"));
+  TEST_ASSERT_TRUE(f.display.shows("undecodable"));
+  TEST_ASSERT_EQUAL(3, f.fs.countFiles("-cover.png"));
+  TEST_ASSERT_EQUAL(0, f.fs.countFiles(".jpg"));
+  TEST_ASSERT_EQUAL(0, f.fs.countFiles(".tmp.png"));
+
+  const int opens = f.fs.opens["/books/plain.epub"];
+  app.onClose();
+  app.onOpen();
+  loadCovers(app);
+  TEST_ASSERT_EQUAL(opens, f.fs.opens["/books/plain.epub"]);
+}
+
+void test_covers_on_screen_are_loaded_before_the_rest() {
+  Fixture f;
+  f.display.storage = &f.fs;
+  f.fs.files.clear();
+  const std::string book = makeEpub(1);
+  for (int i = 10; i < 30; ++i) f.fs.files["/books/" + std::to_string(i) + ".epub"] = book + char(i);
+  EReaderApp app(f.fs, f.display, f.battery);
+  app.onOpen();
+  for (int i = 0; i < 9; ++i) app.onInput(InputEvent::Next);  // the second screen
+
+  for (int i = 0; i < 8; ++i) TEST_ASSERT_FALSE(app.tick());
+  TEST_ASSERT_TRUE(app.tick());  // the ninth cover completes the screen
+  for (size_t i = 0; i < app.books().size(); ++i) {
+    TEST_ASSERT_EQUAL(i >= 9 && i < 18, !app.books()[i].cover.empty());
+  }
+  // The other screens follow, without redrawing this one.
+  TEST_ASSERT_EQUAL(0, loadCovers(app));
+  TEST_ASSERT_EQUAL(20, f.fs.countFiles("-cover.png"));
+}
+
+void test_long_title_without_a_cover_is_wrapped_in_its_box() {
+  Fixture f;
+  f.fs.files.clear();
+  f.fs.files["/books/The Rather Long and Winding Title of a Book With No Cover.epub"] = "x";
+  EReaderApp app(f.fs, f.display, f.battery);
+  app.onOpen();
+  app.draw(f.display);
+  TEST_ASSERT_TRUE(f.display.shows("The Rather"));
+  TEST_ASSERT_TRUE(f.display.shows("Long and"));
+  for (const std::string& text : f.display.texts) {
+    if (text.compare(0, 6, "The Ra") == 0 && text.size() < 30) {
+      TEST_ASSERT_LESS_OR_EQUAL((540 - 2 * 24) / 3, f.display.textWidth(text.c_str(), TextSize::Small));
+    }
+  }
 }
 
 void test_library_explains_a_missing_folder_or_no_books() {
@@ -1573,9 +1821,16 @@ int main(int, char**) {
   RUN_TEST(test_resolve_href);
   RUN_TEST(test_epub_reads_metadata_and_spine_order);
   RUN_TEST(test_epub_rejects_missing_parts);
+  RUN_TEST(test_epub_finds_the_cover_image);
+  RUN_TEST(test_epub_without_a_usable_cover_has_none);
   RUN_TEST(test_pages_remaining);
   RUN_TEST(test_library_lists_only_epubs_sorted_by_title);
   RUN_TEST(test_library_scrolls_a_screen_at_a_time);
+  RUN_TEST(test_library_is_a_grid_of_three_columns);
+  RUN_TEST(test_library_shows_covers_once_they_are_cached);
+  RUN_TEST(test_books_without_a_cover_show_their_title_and_are_not_retried);
+  RUN_TEST(test_covers_on_screen_are_loaded_before_the_rest);
+  RUN_TEST(test_long_title_without_a_cover_is_wrapped_in_its_box);
   RUN_TEST(test_library_explains_a_missing_folder_or_no_books);
   RUN_TEST(test_first_open_indexes_then_shows_the_first_page);
   RUN_TEST(test_second_open_uses_the_cache_without_touching_the_epub);

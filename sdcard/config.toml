@@ -38,6 +38,16 @@
 #   name = "Work"
 #   url = "webcal://outlook.office365.com/owa/calendar/.../calendar.ics"
 
+# The weather forecast shown under each day in the calendar: the weather, high
+# and low temperature and chance of rain, from open-meteo.com (no account
+# needed). Set the latitude and longitude of your town in decimal degrees,
+# negative south of the equator and west of Greenwich; find them by
+# right-clicking the place on a map such as openstreetmap.org.
+# [weather]
+#   latitude = 52.52
+#   longitude = 13.41
+#   units = "celsius"   # or "fahrenheit"
+
 [rss]
   refresh_minutes = 60  # how often to download again while the app is open
   articles = 20         # how many articles to keep from each feed

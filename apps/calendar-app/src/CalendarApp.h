@@ -10,6 +10,7 @@
 
 #include "Agenda.h"
 #include "Ics.h"
+#include "Weather.h"
 
 // Shows the upcoming events from one or more iCal (.ics) links, set in
 // config.toml:
@@ -21,6 +22,10 @@
 //   [[calendar.feed]]
 //     name = "Personal"
 //     url = "https://calendar.example.com/basic.ics"
+//
+// With [weather] set (see Weather.h), each day's heading also shows its
+// forecast: the weather, high and low temperature and chance of rain. The
+// forecast is downloaded after the calendars and cached in the same folder.
 //
 // Calendars are downloaded over Wi-Fi (see [wifi]) into /.cache/calendar on
 // the SD card, so the agenda still shows the last copy when offline. The
@@ -37,6 +42,8 @@ class CalendarApp : public paperos::App {
   static constexpr const char* kCacheRoot = "/.cache";
   static constexpr const char* kCacheDir = "/.cache/calendar";
   static constexpr const char* kAgendaCachePath = "/.cache/calendar/agenda.bin";
+  // The forecast's address on the first line, then Open-Meteo's reply.
+  static constexpr const char* kWeatherCachePath = "/.cache/calendar/weather.json";
   static constexpr int kDefaultDays = 14;
   static constexpr int kDefaultRefreshMinutes = 60;
 
@@ -55,7 +62,7 @@ class CalendarApp : public paperos::App {
     Kind kind = Kind::Event;
     std::string time;    // "09:00 - 10:00", "All day", ... (events only)
     std::string text;    // day name, event title or "No events"
-    std::string detail;  // location and calendar name, may be empty
+    std::string detail;  // location and calendar name, or a day's forecast; may be empty
   };
 
   CalendarApp(const paperos::Config& config, paperos::FileSystem& fs, paperos::Network& network,
@@ -73,6 +80,9 @@ class CalendarApp : public paperos::App {
   Phase phase() const { return phase_; }
   const std::vector<Feed>& feeds() const { return feeds_; }
   const std::vector<calendar::Occurrence>& occurrences() const { return occurrences_; }
+  // Address of the weather forecast, or "" when [weather] is not set.
+  const std::string& weatherUrl() const { return weatherUrl_; }
+  const std::vector<calendar::DayForecast>& forecasts() const { return forecasts_; }
   size_t pageCount() const { return pages_.size(); }
   size_t currentPage() const { return page_; }  // zero-based
   const std::vector<Row>& pageRows(size_t page) const { return pages_[page]; }
@@ -102,6 +112,10 @@ class CalendarApp : public paperos::App {
   bool downloadStep();
   void openNextDownload();
   void finishDownload(bool ok, std::string error);
+  void finishWeatherDownload(bool ok, std::string error);
+  void loadCachedWeather();
+  void saveCachedWeather(const std::string& json) const;
+  void addConfigErrors();
   void stopWork();
   void finishSync();
   void removeStaleCaches();
@@ -134,6 +148,9 @@ class CalendarApp : public paperos::App {
   int days_ = kDefaultDays;
   int refreshMinutes_ = kDefaultRefreshMinutes;
   bool debug_ = false;
+  std::string weatherUrl_;
+  bool weatherFahrenheit_ = false;
+  bool weatherInvalid_ = false;  // [weather] is set but its place is not usable
 
   Phase phase_ = Phase::Idle;
   uint32_t phaseStartedMs_ = 0;
@@ -159,8 +176,12 @@ class CalendarApp : public paperos::App {
   std::vector<std::string> errors_;  // from the last sync
   std::string wifiDetail_;  // see wifiFailureDetail()
   int64_t lastSync_ = 0;
+  bool downloadingWeather_ = false;
+  bool weatherUpdated_ = false;  // in this sync
+  std::string weatherBody_;
 
   std::vector<calendar::Occurrence> occurrences_;
+  std::vector<calendar::DayForecast> forecasts_;
   std::vector<std::vector<Row>> pages_;
   static constexpr int64_t kUnknownDay = INT64_MIN;
   int64_t pagesToday_ = kUnknownDay;  // today() when pages_ were built, for the labels

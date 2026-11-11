@@ -6,6 +6,7 @@
 #include <CivilTime.h>
 #include <Ics.h>
 #include <Recurrence.h>
+#include <Weather.h>
 #include <paperos.h>
 
 #include <algorithm>
@@ -1105,6 +1106,154 @@ void test_app_relabels_and_moves_on_once_the_time_is_known() {
   TEST_ASSERT_EQUAL_STRING("Today, Tue 10 Nov", f.app.pageRows(0)[0].text.c_str());
 }
 
+// --- Weather ---------------------------------------------------------------
+
+// Open-Meteo's reply for three days from Monday 9 November 2026, trimmed.
+const char* const kForecastJson =
+    "{\"latitude\":52.52,\"longitude\":13.419998,\"timezone\":\"Europe/Berlin\","
+    "\"daily_units\":{\"time\":\"iso8601\",\"weather_code\":\"wmo code\","
+    "\"temperature_2m_max\":\"\xC2\xB0" "C\",\"temperature_2m_min\":\"\xC2\xB0" "C\","
+    "\"precipitation_probability_max\":\"%\"},"
+    "\"daily\":{\"time\":[\"2026-11-09\",\"2026-11-10\",\"2026-11-11\"],\n"
+    "  \"weather_code\":[2, 61, null],\n"
+    "  \"temperature_2m_max\":[12.4,9.6,-0.4],\n"
+    "  \"temperature_2m_min\":[4.5,3.1,-5.6],\n"
+    "  \"precipitation_probability_max\":[10,85,null]}}";
+
+const char* const kWeatherConfig =
+    "[calendar]\n"
+    "  days = 7\n"
+    "[[calendar.feed]]\n"
+    "  name = \"Home\"\n"
+    "  url = \"https://example.com/home.ics\"\n"
+    "[weather]\n"
+    "  latitude = 52.52\n"
+    "  longitude = 13.41\n";
+
+const char* const kWeatherUrl =
+    "https://api.open-meteo.com/v1/forecast?latitude=52.52&longitude=13.41"
+    "&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max"
+    "&timezone=auto&forecast_days=7";
+
+void test_parses_an_open_meteo_forecast() {
+  std::vector<DayForecast> days;
+  TEST_ASSERT_TRUE(parseForecast(kForecastJson, days));
+  TEST_ASSERT_EQUAL_INT(3, (int)days.size());
+  TEST_ASSERT_EQUAL_STRING("2026-11-10 00:00", format(days[1].day).c_str());
+  TEST_ASSERT_EQUAL_INT(61, days[1].code);
+  TEST_ASSERT_EQUAL_INT(10, days[1].high);
+  TEST_ASSERT_EQUAL_INT(3, days[1].low);
+  TEST_ASSERT_EQUAL_INT(85, days[1].rainChance);
+  TEST_ASSERT_EQUAL_STRING("Partly cloudy   High 12C  Low 5C   Rain 10%",
+                           forecastText(days[0], false).c_str());
+  // Missing values are left out.
+  TEST_ASSERT_EQUAL_STRING("High 0F  Low -6F", forecastText(days[2], true).c_str());
+
+  std::vector<DayForecast> untouched = days;
+  TEST_ASSERT_FALSE(parseForecast("{\"error\":true,\"reason\":\"Latitude must be in range\"}",
+                                  untouched));
+  TEST_ASSERT_FALSE(parseForecast("<html>Bad gateway</html>", untouched));
+  TEST_ASSERT_EQUAL_INT(3, (int)untouched.size());
+}
+
+void test_weather_settings_check_the_place() {
+  WeatherSettings settings;
+  TEST_ASSERT_TRUE(parseWeatherSettings("-33.87", "151.21", "fahrenheit", settings));
+  TEST_ASSERT_TRUE(settings.fahrenheit);
+  TEST_ASSERT_EQUAL_STRING(
+      "https://api.open-meteo.com/v1/forecast?latitude=-33.87&longitude=151.21"
+      "&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max"
+      "&timezone=auto&forecast_days=16&temperature_unit=fahrenheit",
+      forecastUrl(settings, 30).c_str());
+  TEST_ASSERT_FALSE(parseWeatherSettings("91", "0", "", settings));
+  TEST_ASSERT_FALSE(parseWeatherSettings("52.52", "", "", settings));
+  TEST_ASSERT_FALSE(parseWeatherSettings("52.52&x=1", "13.41", "", settings));
+  TEST_ASSERT_FALSE(parseWeatherSettings("Berlin", "13.41", "", settings));
+}
+
+void test_app_shows_the_weather_under_each_day() {
+  AppFixture f(kWeatherConfig);
+  f.network.bodies[kWeatherUrl] = kForecastJson;
+  f.app.onOpen();
+  TEST_ASSERT_EQUAL_STRING(kWeatherUrl, f.app.weatherUrl().c_str());
+  f.runUntilIdle();
+
+  TEST_ASSERT_EQUAL_INT(2, (int)f.network.requests.size());
+  TEST_ASSERT_EQUAL_STRING(kWeatherUrl, f.network.requests[1].c_str());
+  TEST_ASSERT_EQUAL_INT(1, f.network.disconnects);
+  TEST_ASSERT_EQUAL_STRING(
+      "|Today, Mon 9 Nov|Partly cloudy   High 12C  Low 5C   Rain 10%\n"
+      "09:30 - 09:45|Standup|\n"
+      "|Tomorrow, Tue 10 Nov|Light rain   High 10C  Low 3C   Rain 85%\n"
+      "09:30 - 09:45|Standup|\n"
+      "15:00 - 16:00|New York call|\n"
+      "|Wed 11 Nov|High 0C  Low -6C\n"
+      "13:00 - 13:30|Cafe with Anna|Main St. 4, Berlin\n"
+      "|Thu 12 Nov|\n"
+      "All day|Trip|\n"
+      "11:30 - 11:45|Standup (moved)|\n"
+      "|Fri 13 Nov|\n"
+      "All day|Trip|\n",
+      f.allPagesText().c_str());
+  f.draw();
+  TEST_ASSERT_TRUE(f.display.shows("Partly cloudy   High 12C  Low 5C   Rain 10%"));
+  TEST_ASSERT_TRUE(f.display.shows("Updated 08:00"));
+
+  // Opened again while fresh: the cached forecast shows without downloading.
+  f.app.onClose();
+  f.network.requests.clear();
+  f.app.onOpen();
+  f.runUntilIdle();
+  TEST_ASSERT_EQUAL_INT(0, (int)f.network.requests.size());
+  TEST_ASSERT_EQUAL_INT(3, (int)f.app.forecasts().size());
+  TEST_ASSERT_EQUAL_STRING("Partly cloudy   High 12C  Low 5C   Rain 10%",
+                           f.app.pageRows(0)[0].detail.c_str());
+
+  // A cached forecast for other units is not shown.
+  f.app.onClose();
+  f.config.parse((std::string(kWeatherConfig) + "  units = \"fahrenheit\"\n").c_str());
+  f.app.onOpen();
+  f.runUntilIdle();
+  TEST_ASSERT_EQUAL_INT(0, (int)f.app.forecasts().size());
+}
+
+void test_failed_forecast_keeps_the_calendar_and_old_forecast() {
+  AppFixture f(kWeatherConfig);
+  f.fs.files[CalendarApp::kWeatherCachePath] = std::string(kWeatherUrl) + "\n" + kForecastJson;
+  f.network.bodies[kWeatherUrl] = "<html>Bad gateway</html>";
+  f.app.onOpen();
+  f.runUntilIdle();
+  TEST_ASSERT_EQUAL_INT(6, (int)f.app.occurrences().size());
+  TEST_ASSERT_EQUAL_INT(3, (int)f.app.forecasts().size());
+  f.draw();
+  TEST_ASSERT_TRUE(f.display.shows("Weather: not a forecast, check [weather]"));
+  TEST_ASSERT_TRUE(f.display.shows("Partly cloudy   High 12C  Low 5C   Rain 10%"));
+
+  // Only the forecast downloads: the agenda is redrawn with it.
+  f.network.bodies[kWeatherUrl] = std::string(kForecastJson);
+  f.network.bodies[kFeedUrl] = "<html>Sign in</html>";
+  f.fs.files.erase(CalendarApp::kWeatherCachePath);
+  f.app.onClose();
+  f.app.onOpen();
+  TEST_ASSERT_EQUAL_INT(0, (int)f.app.forecasts().size());
+  TEST_ASSERT_TRUE(f.app.onInput(InputEvent::Select));
+  f.runUntilIdle();
+  TEST_ASSERT_EQUAL_INT(3, (int)f.app.forecasts().size());
+  TEST_ASSERT_EQUAL_STRING("Partly cloudy   High 12C  Low 5C   Rain 10%",
+                           f.app.pageRows(0)[0].detail.c_str());
+  TEST_ASSERT_TRUE(f.app.wantsFullRefresh());
+}
+
+void test_bad_weather_place_is_reported() {
+  AppFixture f((std::string(kOneFeed) + "[weather]\n  latitude = \"Berlin\"\n").c_str());
+  f.app.onOpen();
+  f.runUntilIdle();
+  TEST_ASSERT_TRUE(f.app.weatherUrl().empty());
+  TEST_ASSERT_EQUAL_INT(1, (int)f.network.requests.size());
+  f.draw();
+  TEST_ASSERT_TRUE(f.display.shows("Check [weather] latitude and longitude"));
+}
+
 int main(int, char**) {
   UNITY_BEGIN();
   RUN_TEST(test_civil_dates_round_trip);
@@ -1142,5 +1291,10 @@ int main(int, char**) {
   RUN_TEST(test_app_ignores_a_cached_agenda_that_does_not_fit);
   RUN_TEST(test_app_shows_the_cached_agenda_before_the_time_is_known);
   RUN_TEST(test_app_relabels_and_moves_on_once_the_time_is_known);
+  RUN_TEST(test_parses_an_open_meteo_forecast);
+  RUN_TEST(test_weather_settings_check_the_place);
+  RUN_TEST(test_app_shows_the_weather_under_each_day);
+  RUN_TEST(test_failed_forecast_keeps_the_calendar_and_old_forecast);
+  RUN_TEST(test_bad_weather_place_is_reported);
   return UNITY_END();
 }

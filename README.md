@@ -80,6 +80,17 @@ The Calendar shows the coming two weeks of events from one or more iCal (`.ics`)
 
 Add a `[[calendar.feed]]` block for each calendar. Events are listed by day with their time and location; with more than one calendar, each event also shows which calendar it's from.
 
+To show the weather forecast under each day's heading (the weather, the high and low temperature and the chance of rain), add the latitude and longitude of your town:
+
+```toml
+[weather]
+  latitude = 52.52      # decimal degrees, negative south of the equator
+  longitude = 13.41     # negative west of Greenwich
+  units = "celsius"     # or "fahrenheit"
+```
+
+The forecast comes from [Open-Meteo](https://open-meteo.com), which needs no account, and is downloaded along with the calendars. It covers up to 16 days ahead.
+
 | Input        | Calendar                     |
 |--------------|------------------------------|
 | Press **A**  | Previous page                |

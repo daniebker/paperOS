@@ -38,6 +38,9 @@ constexpr char kAgendaMagic[4] = {'P', 'C', 'A', 'L'};
 constexpr uint8_t kAgendaVersion = 1;
 // Bigger than any agenda of kMaxOccurrences could be; anything larger is junk.
 constexpr uint32_t kMaxAgendaCacheBytes = 4 * 1024 * 1024;
+// A 16 day forecast is about 1 KB; anything much larger is not one.
+constexpr size_t kMaxWeatherBytes = 32 * 1024;
+constexpr const char* kWeatherConfigError = "Check [weather] latitude and longitude";
 
 char chunk[2048];
 
@@ -173,17 +176,40 @@ void CalendarApp::readFeeds() {
   refreshMinutes_ = int(std::max<long>(
       0, config_.getInt("calendar", "refresh_minutes", kDefaultRefreshMinutes)));
   debug_ = paperos::debugEnabled(config_);
+
+  weatherUrl_.clear();
+  weatherFahrenheit_ = false;
+  weatherInvalid_ = false;
+  if (config_.has("weather", "latitude") || config_.has("weather", "longitude")) {
+    calendar::WeatherSettings weather;
+    if (calendar::parseWeatherSettings(config_.getString("weather", "latitude"),
+                                       config_.getString("weather", "longitude"),
+                                       config_.getString("weather", "units", "celsius"),
+                                       weather)) {
+      weatherUrl_ = calendar::forecastUrl(weather, days_);
+      weatherFahrenheit_ = weather.fahrenheit;
+    } else {
+      weatherInvalid_ = true;
+    }
+  }
+}
+
+void CalendarApp::addConfigErrors() {
+  if (weatherInvalid_) errors_.push_back(kWeatherConfigError);
 }
 
 void CalendarApp::onOpen() {
   readFeeds();
   page_ = 0;
   errors_.clear();
+  addConfigErrors();
   wifiDetail_.clear();
   occurrences_.clear();
+  forecasts_.clear();
   pages_.clear();
   loaded_ = false;
   syncAttempted_ = false;
+  downloadingWeather_ = false;
   fullRefreshPending_ = false;
   phase_ = Phase::Idle;
   lastCheckMs_ = clock_.uptimeMs();
@@ -192,6 +218,7 @@ void CalendarApp::onOpen() {
   fs_.makeDir(kCacheRoot);
   fs_.makeDir(kCacheDir);
   loadSyncTime();
+  loadCachedWeather();  // before the agenda, whose day headings show it
   // Stale-while-revalidate: show the cached agenda at once, then download in
   // the background if it is due. Without a usable cached agenda, build one
   // from the downloaded calendars first.
@@ -210,6 +237,8 @@ void CalendarApp::stopWork() {
     fs_.remove((feeds_[downloadIndex_].path + ".part").c_str());
   }
   response_.reset();
+  downloadingWeather_ = false;
+  weatherBody_.clear();
   if (phase_ == Phase::Connecting || phase_ == Phase::SyncingTime ||
       phase_ == Phase::Downloading) {
     network_.disconnect();
@@ -373,8 +402,10 @@ bool CalendarApp::shouldSync() const {
 
 void CalendarApp::startSync() {
   errors_.clear();
+  addConfigErrors();
   setWifiDetail("");
   downloaded_ = 0;
+  weatherUpdated_ = false;
   syncAttempted_ = true;
   syncAttemptMs_ = clock_.uptimeMs();
   phaseStartedMs_ = syncAttemptMs_;
@@ -455,6 +486,18 @@ void CalendarApp::openNextDownload() {
     downloadHead_.clear();
     return;
   }
+  // The forecast comes last, once the calendars are done.
+  if (downloadIndex_ == feeds_.size() && !weatherUrl_.empty()) {
+    ++downloadIndex_;
+    std::string error;
+    response_ = network_.get(weatherUrl_.c_str(), error);
+    if (response_) {
+      downloadingWeather_ = true;
+      weatherBody_.clear();
+      return;
+    }
+    errors_.push_back("Weather: " + error);
+  }
   finishSync();
 }
 
@@ -470,6 +513,14 @@ bool CalendarApp::downloadStep() {
       finishDownload(false, "download interrupted");
       return phase_ != Phase::Downloading;
     }
+    if (downloadingWeather_) {
+      if (weatherBody_.size() + size_t(n) > kMaxWeatherBytes) {
+        finishDownload(false, "not a forecast, check [weather]");
+        return phase_ != Phase::Downloading;
+      }
+      weatherBody_.append(chunk, size_t(n));
+      continue;
+    }
     if (downloadHead_.size() < 64) {
       downloadHead_.append(chunk, std::min<size_t>(size_t(n), 64 - downloadHead_.size()));
     }
@@ -482,6 +533,10 @@ bool CalendarApp::downloadStep() {
 }
 
 void CalendarApp::finishDownload(bool ok, std::string error) {
+  if (downloadingWeather_) {
+    finishWeatherDownload(ok, std::move(error));
+    return;
+  }
   const Feed& feed = feeds_[downloadIndex_];
   const std::string part = feed.path + ".part";
   response_.reset();
@@ -506,6 +561,53 @@ void CalendarApp::finishDownload(bool ok, std::string error) {
   openNextDownload();
 }
 
+void CalendarApp::finishWeatherDownload(bool ok, std::string error) {
+  response_.reset();
+  downloadingWeather_ = false;
+  std::vector<calendar::DayForecast> forecasts;
+  if (ok && !calendar::parseForecast(weatherBody_, forecasts)) {
+    ok = false;
+    error = "not a forecast, check [weather]";
+  }
+  if (ok) {
+    forecasts_ = std::move(forecasts);
+    weatherUpdated_ = true;
+    saveCachedWeather(weatherBody_);
+  } else {
+    errors_.push_back("Weather: " + error);
+  }
+  weatherBody_.clear();
+  weatherBody_.shrink_to_fit();
+  finishSync();
+}
+
+void CalendarApp::loadCachedWeather() {
+  forecasts_.clear();
+  if (weatherUrl_.empty()) return;
+  std::unique_ptr<paperos::File> file = fs_.open(kWeatherCachePath, FileMode::Read);
+  if (!file || file->size() > kMaxWeatherBytes + weatherUrl_.size() + 1) return;
+  std::string data(file->size(), '\0');
+  if (file->read(&data[0], data.size()) != data.size()) return;
+  // Only a forecast for the place and units now set.
+  const size_t newline = data.find('\n');
+  if (newline == std::string::npos || data.compare(0, newline, weatherUrl_) != 0) return;
+  calendar::parseForecast(data.substr(newline + 1), forecasts_);
+}
+
+void CalendarApp::saveCachedWeather(const std::string& json) const {
+  const std::string data = weatherUrl_ + "\n" + json;
+  const std::string part = std::string(kWeatherCachePath) + ".part";
+  std::unique_ptr<paperos::File> file = fs_.open(part.c_str(), FileMode::Write);
+  if (!file) return;
+  const bool written = file->write(data.data(), data.size()) == data.size();
+  file.reset();
+  if (written) {
+    fs_.remove(kWeatherCachePath);
+    if (fs_.rename(part.c_str(), kWeatherCachePath)) return;
+  }
+  fs_.remove(part.c_str());
+}
+
 void CalendarApp::finishSync() {
   network_.disconnect();
   phase_ = Phase::Idle;
@@ -514,7 +616,13 @@ void CalendarApp::finishSync() {
     saveSyncTime();
     removeStaleCaches();
   }
-  if (downloaded_ > 0 || !loaded_) startLoading();
+  if (downloaded_ > 0 || !loaded_) {
+    startLoading();
+  } else if (weatherUpdated_) {  // only the forecast changed
+    buildPages();
+    if (page_ >= pages_.size()) page_ = pages_.empty() ? 0 : pages_.size() - 1;
+    fullRefreshPending_ = true;
+  }
 }
 
 void CalendarApp::removeStaleCaches() {
@@ -650,6 +758,12 @@ std::vector<CalendarApp::Row> CalendarApp::buildRows() const {
     if (pagesToday_ != kUnknownDay && dayStart == pagesToday_ + kSecondsPerDay) {
       day.text = "Tomorrow, " + day.text;
     }
+    for (const calendar::DayForecast& forecast : forecasts_) {
+      if (forecast.day == dayStart) {
+        day.detail = calendar::forecastText(forecast, weatherFahrenheit_);
+        break;
+      }
+    }
     rows.push_back(day);
     if (events.empty()) {
       Row empty;
@@ -665,7 +779,8 @@ std::vector<CalendarApp::Row> CalendarApp::buildRows() const {
 int CalendarApp::rowHeight(const Row& row) const {
   switch (row.kind) {
     case Row::Kind::Day:
-      return display_.textHeight(TextSize::Large) + kRowGap;
+      return display_.textHeight(TextSize::Large) + kRowGap +
+             (row.detail.empty() ? 0 : display_.textHeight(TextSize::Small) + 4);
     case Row::Kind::Empty:
       return display_.textHeight(TextSize::Medium) + kRowGap;
     case Row::Kind::Event:
@@ -875,7 +990,14 @@ void CalendarApp::drawRow(paperos::Display& display, const Row& row, int y) cons
     case Row::Kind::Day: {
       const std::string text = fitToWidth(display, row.text, TextSize::Large, w - 2 * kMargin);
       display.drawText(text.c_str(), kMargin, y, TextSize::Large);
-      const int lineY = y + display.textHeight(TextSize::Large) + 2;
+      int lineY = y + display.textHeight(TextSize::Large) + 2;
+      if (!row.detail.empty()) {  // the day's forecast
+        const std::string weather =
+            fitToWidth(display, row.detail, TextSize::Small, w - 2 * kMargin);
+        display.drawText(weather.c_str(), kMargin, lineY, TextSize::Small, TextAlign::Left,
+                         Color::DarkGray);
+        lineY += display.textHeight(TextSize::Small) + 4;
+      }
       display.drawLine(kMargin, lineY, w - kMargin, lineY, Color::LightGray);
       return;
     }

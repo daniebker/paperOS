@@ -45,6 +45,8 @@ class EReaderApp : public paperos::App {
   EReaderApp(paperos::FileSystem& fs, paperos::Display& display, const paperos::Battery& battery);
 
   const char* name() const override { return "E-Reader"; }
+  void drawIcon(paperos::Display& display, int x, int y, int size,
+                paperos::Color color) const override;
   void onOpen() override;
   void onClose() override;
   bool onInput(paperos::InputEvent event) override;

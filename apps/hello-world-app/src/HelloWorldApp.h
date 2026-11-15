@@ -20,6 +20,8 @@ class HelloWorldApp : public paperos::App {
   explicit HelloWorldApp(const paperos::Config& config) : config_(config) {}
 
   const char* name() const override { return "Hello World"; }
+  void drawIcon(paperos::Display& display, int x, int y, int size,
+                paperos::Color color) const override;
   void onOpen() override;
   bool onInput(paperos::InputEvent event) override;
   void draw(paperos::Display& display) override;

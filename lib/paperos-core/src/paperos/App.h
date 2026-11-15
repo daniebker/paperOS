@@ -1,6 +1,7 @@
 #pragma once
 
 #include "paperos/Display.h"
+#include "paperos/Icon.h"
 #include "paperos/Input.h"
 
 namespace paperos {
@@ -24,6 +25,14 @@ class App {
 
   // Name shown on the home screen.
   virtual const char* name() const = 0;
+
+  // Draws the app's icon, shown beside its name on the home screen, into the
+  // square at (x, y) with sides `size` pixels long. `color` is the ink to use;
+  // it is white on the selected row. The helpers in paperos/Icon.h draw thick
+  // strokes. Apps that don't override it get the first letter of their name.
+  virtual void drawIcon(Display& display, int x, int y, int size, Color color) const {
+    drawLetterIcon(display, name(), x, y, size, color);
+  }
 
   virtual void onOpen() {}
   virtual void onClose() {}

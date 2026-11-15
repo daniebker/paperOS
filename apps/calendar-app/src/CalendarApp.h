@@ -70,6 +70,8 @@ class CalendarApp : public paperos::App {
               const paperos::Battery& battery);
 
   const char* name() const override { return "Calendar"; }
+  void drawIcon(paperos::Display& display, int x, int y, int size,
+                paperos::Color color) const override;
   void onOpen() override;
   void onClose() override;
   bool onInput(paperos::InputEvent event) override;

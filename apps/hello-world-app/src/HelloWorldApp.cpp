@@ -85,3 +85,18 @@ void HelloWorldApp::draw(paperos::Display& display) {
                      TextAlign::Center, Color::DarkGray);
   }
 }
+
+// A speech bubble.
+void HelloWorldApp::drawIcon(paperos::Display& display, int x, int y, int s, Color color) const {
+  const int t = paperos::iconStroke(s);
+  const int top = y + s / 8;
+  const int bottom = y + s * 3 / 4;
+  paperos::strokeRect(display, x, top, s, bottom - top, t, color);
+  paperos::strokeLine(display, x + s / 4, bottom, x + s / 6, y + s - t, t, color);
+  paperos::strokeLine(display, x + s / 6, y + s - t, x + s / 2, bottom, t, color);
+  // Two lines of text.
+  const int line = t > 2 ? t - 1 : 2;
+  paperos::strokeLine(display, x + s / 5, top + s / 5, x + s * 4 / 5, top + s / 5, line, color);
+  paperos::strokeLine(display, x + s / 5, top + s * 2 / 5, x + s * 3 / 5, top + s * 2 / 5, line,
+                      color);
+}

@@ -9,6 +9,7 @@
 #include "paperos/Config.h"
 #include "paperos/Display.h"
 #include "paperos/FileSystem.h"
+#include "paperos/Icon.h"
 #include "paperos/ImageSize.h"
 #include "paperos/Input.h"
 #include "paperos/LogFile.h"

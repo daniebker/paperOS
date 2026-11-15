@@ -18,17 +18,23 @@ void drawAppList(Display& display, const char* title, const Battery* battery, Ap
   const int headerBottom = margin * 2 + titleH;
   display.fillRect(0, headerBottom - 4, w, 4, Color::Black);
 
-  // App list.
-  const int rowH = display.textHeight(TextSize::Large) + 24;
+  // App list: each app's icon, then its name.
+  const int textH = display.textHeight(TextSize::Large);
+  const int iconSize = textH + 8;
+  const int rowH = iconSize + 20;
+  const int iconX = margin * 2;
+  const int textX = iconX + iconSize + margin;
   int y = headerBottom + margin;
   if (count == 0) {
     display.drawText("No apps installed", margin, y, TextSize::Large);
   }
   for (size_t i = 0; i < count; ++i) {
     const bool isSelected = i == selected;
+    const Color ink = isSelected ? Color::White : Color::Black;
     if (isSelected) display.fillRect(margin / 2, y, w - margin, rowH, Color::Black);
-    display.drawText(apps[i]->name(), margin * 2, y + 12, TextSize::Large, TextAlign::Left,
-                     isSelected ? Color::White : Color::Black);
+    apps[i]->drawIcon(display, iconX, y + (rowH - iconSize) / 2, iconSize, ink);
+    display.drawText(apps[i]->name(), textX, y + (rowH - textH) / 2, TextSize::Large,
+                     TextAlign::Left, ink);
     y += rowH + 8;
   }
 

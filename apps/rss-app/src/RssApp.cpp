@@ -1004,3 +1004,14 @@ void RssApp::draw(paperos::Display& display) {
     drawList(display);
   }
 }
+
+// The feed symbol: a dot and two waves.
+void RssApp::drawIcon(paperos::Display& display, int x, int y, int s, Color color) const {
+  const int t = paperos::iconStroke(s) + 1;
+  const int dot = s / 5;
+  const int cx = x + t / 2;
+  const int cy = y + s - t / 2 - 1;
+  display.fillRect(x, y + s - dot, dot, dot, color);
+  paperos::strokeArc(display, cx, cy, s / 2, -90, 0, t, color);
+  paperos::strokeArc(display, cx, cy, s - t, -90, 0, t, color);
+}

@@ -1,5 +1,7 @@
 #include "SyncApp.h"
 
+#include <cmath>
+
 using paperos::Color;
 using paperos::DavCheck;
 using paperos::InputEvent;
@@ -203,4 +205,29 @@ void SyncApp::draw(paperos::Display& display) {
                            : "Hold B: back";
   display.drawText(legend, w / 2, h - kMargin - smallH, TextSize::Small, TextAlign::Center,
                    Color::DarkGray);
+}
+
+// Two arrows chasing each other round a circle.
+void SyncApp::drawIcon(paperos::Display& display, int x, int y, int s, Color color) const {
+  const int t = paperos::iconStroke(s);
+  const int cx = x + s / 2;
+  const int cy = y + s / 2;
+  const int r = s * 3 / 8;
+  const int head = s / 5;
+  // Each arc runs clockwise; the arrowhead is at its end.
+  const int arcs[2][2] = {{200, 340}, {20, 160}};
+  for (const auto& arc : arcs) {
+    paperos::strokeArc(display, cx, cy, r, arc[0], arc[1], t, color);
+    const double a = arc[1] * 3.14159265358979323846 / 180.0;
+    const int px = cx + int(std::lround(r * std::cos(a)));
+    const int py = cy + int(std::lround(r * std::sin(a)));
+    // Back along the arc's direction, then out to either side.
+    const double backX = std::sin(a), backY = -std::cos(a);
+    const double outX = std::cos(a), outY = std::sin(a);
+    for (int side = -1; side <= 1; side += 2) {
+      paperos::strokeLine(display, px, py,
+                          px + int(std::lround(head * (backX + side * outX))),
+                          py + int(std::lround(head * (backY + side * outY))), t, color);
+    }
+  }
 }

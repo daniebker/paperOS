@@ -29,6 +29,14 @@ class AppMenu : public App {
   bool addApp(App* app);
 
   const char* name() const override { return name_; }
+
+  // Sets the icon shown on the home screen, such as drawGearIcon. Without
+  // one, the menu shows drawFolderIcon.
+  void setIcon(IconFn icon) { icon_ = icon; }
+  void drawIcon(Display& display, int x, int y, int size, Color color) const override {
+    (icon_ != nullptr ? icon_ : drawFolderIcon)(display, x, y, size, color);
+  }
+
   void onOpen() override;
   void onClose() override;
   bool onInput(InputEvent event) override;
@@ -45,6 +53,7 @@ class AppMenu : public App {
 
   const char* name_;
   const Battery* battery_;
+  IconFn icon_ = nullptr;
   App* apps_[kMaxApps] = {};
   size_t appCount_ = 0;
   size_t selected_ = 0;

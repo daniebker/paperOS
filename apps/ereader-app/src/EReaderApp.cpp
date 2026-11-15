@@ -704,3 +704,19 @@ void EReaderApp::drawError(paperos::Display& display) {
   display.drawText(message.c_str(), w / 2, y, TextSize::Small, TextAlign::Center);
   drawFooterLegend(display, "Hold B: back");
 }
+
+// An open book: two pages with lines of text.
+void EReaderApp::drawIcon(paperos::Display& display, int x, int y, int s, Color color) const {
+  const int t = paperos::iconStroke(s);
+  const int top = y + s / 8;
+  const int h = s * 3 / 4;
+  const int half = s / 2 + t / 2;
+  paperos::strokeRect(display, x, top, half, h, t, color);
+  paperos::strokeRect(display, x + s - half, top, half, h, t, color);
+  const int line = t > 2 ? t - 1 : 2;
+  for (int i = 1; i <= 3; ++i) {
+    const int ly = top + h * i / 4;
+    paperos::strokeLine(display, x + s / 8, ly, x + s / 2 - s / 8, ly, line, color);
+    paperos::strokeLine(display, x + s / 2 + s / 8, ly, x + s - s / 8, ly, line, color);
+  }
+}

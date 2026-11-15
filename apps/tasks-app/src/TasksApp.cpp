@@ -1063,3 +1063,22 @@ void TasksApp::draw(paperos::Display& display) {
       break;
   }
 }
+
+// A checklist: a ticked box and an empty one, each with a line of text.
+void TasksApp::drawIcon(paperos::Display& display, int x, int y, int s, Color color) const {
+  const int t = paperos::iconStroke(s);
+  const int box = s * 3 / 8;
+  const int rows[2] = {y + s / 16, y + s - s / 16 - box};
+  for (int i = 0; i < 2; ++i) {
+    const int by = rows[i];
+    paperos::strokeRect(display, x, by, box, box, t, color);
+    paperos::strokeLine(display, x + box + s / 6, by + box / 2, x + s - t / 2, by + box / 2, t,
+                        color);
+  }
+  // Tick in the first box.
+  const int by = rows[0];
+  paperos::strokeLine(display, x + box / 4, by + box / 2, x + box / 2 - t / 2,
+                      by + box * 3 / 4, t, color);
+  paperos::strokeLine(display, x + box / 2 - t / 2, by + box * 3 / 4, x + box * 3 / 4 + t / 2,
+                      by + box / 4, t, color);
+}

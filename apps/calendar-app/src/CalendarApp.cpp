@@ -1034,3 +1034,20 @@ void CalendarApp::drawMessage(paperos::Display& display, const char* title,
                      TextSize::Small, TextAlign::Center, Color::DarkGray);
   }
 }
+
+// A wall calendar: a page with a heading bar, two rings and a grid of days.
+void CalendarApp::drawIcon(paperos::Display& display, int x, int y, int s, Color color) const {
+  const int t = paperos::iconStroke(s);
+  const int top = y + s / 8;
+  paperos::strokeRect(display, x, top, s, s - s / 8, t, color);
+  display.fillRect(x, top, s, s / 4, color);
+  display.fillRect(x + s / 4 - t / 2, y, t, s / 8, color);
+  display.fillRect(x + s * 3 / 4 - t / 2, y, t, s / 8, color);
+  const int day = s / 8;
+  for (int row = 0; row < 2; ++row) {
+    for (int col = 0; col < 3; ++col) {
+      display.fillRect(x + s * (2 + 3 * col) / 12 + day / 4, y + s / 2 + row * s / 4, day, day,
+                       color);
+    }
+  }
+}

@@ -228,6 +228,7 @@ void setup() {
   static TasksApp tasksApp(config, sdFileSystem, network, systemClock, m5Display, battery);
   static SyncApp syncApp(config, network, systemClock, battery);
   static paperos::AppMenu settingsMenu("Settings", &battery);
+  settingsMenu.setIcon(paperos::drawGearIcon);
   settingsMenu.addApp(&syncApp);
 
   shell.setBattery(&battery);

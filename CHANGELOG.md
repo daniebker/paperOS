@@ -6,6 +6,14 @@ All notable changes to paperOS are listed here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- The home screen and **Settings** show an icon beside each app's name: a
+  speech bubble for Hello World, an open book for the E-Reader, a calendar,
+  a checklist for Tasks, the feed symbol for RSS, a gear for Settings and
+  circling arrows for Sync. Apps can draw their own by overriding
+  `App::drawIcon()`; otherwise they show the first letter of their name.
+
 ## [1.2.0] - 2026-11-11
 
 ### Added

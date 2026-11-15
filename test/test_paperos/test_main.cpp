@@ -164,6 +164,20 @@ class CountingApp : public App {
   int closed = 0;
 };
 
+// Records the icons the home screen asks it to draw.
+class IconApp : public CountingApp {
+ public:
+  explicit IconApp(const char* n) : CountingApp(n) {}
+  void drawIcon(Display&, int, int, int size, Color color) const override {
+    ++drawn;
+    lastSize = size;
+    lastColor = color;
+  }
+  mutable int drawn = 0;
+  mutable int lastSize = 0;
+  mutable Color lastColor = Color::LightGray;
+};
+
 class FakeBattery : public Battery {
  public:
   int level() const override { return charge; }
@@ -607,6 +621,44 @@ void test_home_screen_shows_the_battery_level() {
   }
 }
 
+void test_home_screen_shows_app_icons() {
+  Shell shell;
+  FakeDisplay display;
+  IconApp a("One"), b("Two");
+  CountingApp plain("Plain");
+  shell.addApp(&a);
+  shell.addApp(&b);
+  shell.addApp(&plain);
+
+  shell.draw(display);
+  TEST_ASSERT_EQUAL_INT(1, a.drawn);
+  TEST_ASSERT_EQUAL_INT(1, b.drawn);
+  TEST_ASSERT_TRUE(a.lastSize > 0);
+  ASSERT_ENUM(Color::White, a.lastColor);  // on the selected, black row
+  ASSERT_ENUM(Color::Black, b.lastColor);
+  TEST_ASSERT_TRUE(display.shows("P"));  // apps without an icon show their initial
+
+  shell.handle(InputEvent::Next);
+  shell.draw(display);
+  ASSERT_ENUM(Color::Black, a.lastColor);
+  ASSERT_ENUM(Color::White, b.lastColor);
+}
+
+void test_icon_helpers_draw() {
+  FakeDisplay display;
+  display.beginFrame(Color::White);
+  strokeLine(display, 0, 0, 10, 0, 3, Color::Black);
+  TEST_ASSERT_EQUAL_INT(1, display.filledRects);  // straight lines are one rectangle
+  strokeRect(display, 0, 0, 20, 20, 2, Color::Black);
+  TEST_ASSERT_EQUAL_INT(5, display.filledRects);
+  strokeArc(display, 50, 50, 10, 0, 90, 2, Color::Black);
+  TEST_ASSERT_TRUE(display.filledRects > 10);
+  const int before = display.filledRects;
+  drawGearIcon(display, 0, 0, 48, Color::Black);
+  drawFolderIcon(display, 0, 0, 48, Color::Black);
+  TEST_ASSERT_TRUE(display.filledRects > before);
+}
+
 void test_wifi_status_icon() {
   FakeDisplay display;
   display.beginFrame(Color::White);
@@ -919,6 +971,8 @@ int main(int, char**) {
   RUN_TEST(test_menu_forwards_ticks_and_closes_its_app);
   RUN_TEST(test_menu_closes_its_app_before_sleep);
   RUN_TEST(test_home_screen_shows_the_battery_level);
+  RUN_TEST(test_home_screen_shows_app_icons);
+  RUN_TEST(test_icon_helpers_draw);
   RUN_TEST(test_app_can_request_a_quality_refresh);
   RUN_TEST(test_wifi_status_icon);
   RUN_TEST(test_idle_timer);

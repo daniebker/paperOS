@@ -16,6 +16,8 @@ The two side buttons handle all navigation:
 
 A hold counts as a long press once it reaches 600 ms. It fires while the button is still down.
 
+The home screen lists the apps, each with an icon beside its name.
+
 Double press the **power button** to switch off, leaving a wallpaper on the screen, and press it once to switch back on (see [Sleep](#sleep)).
 
 ## E-Reader
@@ -260,6 +262,7 @@ lib/paperos-core/         hardware-independent OS core
   src/paperos/Config.*    config.toml parser and lookup
   src/paperos/Display.h   drawing interface apps render to
   src/paperos/FileSystem.h  storage interface used by apps
+  src/paperos/Icon.*      thick-stroke drawing helpers and shared home-screen icons
   src/paperos/Input.*     button -> gesture -> navigation event mapping
   src/paperos/Network.h   Wi-Fi and HTTP interface used by apps
   src/paperos/Shell.*     home screen and app switching
@@ -418,6 +421,7 @@ To change the screen orientation, set `kDisplayRotation` in `src/main.cpp`: 0 is
 1. Create `apps/<your-app>/` with a `library.json` and a `src/` folder. Copy `apps/hello-world-app` as a starting point.
 2. Subclass `paperos::App`:
    - Implement `name()` and `draw()`.
+   - Optionally override `drawIcon()` to draw the icon shown beside the name on the home screen, using the thick-stroke helpers in `paperos/Icon.h` (`strokeLine`, `strokeRect`, `strokeArc`). Draw in the `color` you're given: it is white on the selected row. Without it, the app shows the first letter of its name in a box.
    - Override `onInput()` to react to `Previous` / `Next` / `Select`. Return `true` when the screen should be redrawn.
    - Leave `Back` unhandled (return `false`) to let the shell exit the app. Handle it yourself only to go back within the app, for example from a book to the library.
 3. To read settings, take a `const paperos::Config&` in the constructor and call `config.getString("section", "key", "default")`. `HelloWorldApp` shows how.

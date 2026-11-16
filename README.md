@@ -28,7 +28,7 @@ Copy `.epub` files into a `books` folder on the SD card, then open **E-Reader** 
 |--------------|----------------------|----------------------|----------------------|
 | Press **A**  | Previous book        | Previous page        | Move selection up    |
 | Press **B**  | Next book            | Next page            | Move selection down  |
-| Hold **A**   | Open selected book   | –                    | Choose selected item |
+| Hold **A**   | Open selected book   | Bookmark this page   | Choose selected item |
 | Hold **B**   | Back to home screen  | Open the book menu   | Back to the book     |
 
 The home screen, library, book menu and the bottom of each page show the battery level. It's estimated from the battery voltage, so treat it as approximate; it reads high while charging. It updates when the screen redraws.
@@ -39,7 +39,20 @@ The first time you open a book, paperOS indexes it: it extracts the text and lay
 
 Your place is saved on every page turn, so you can switch off at any time, and it's kept on the SD card, so it survives firmware updates. The bottom of each page shows your position and the pages remaining, for example `Page 41 of 635` and `594 pages left`.
 
-The book menu has **Font size**, **Line height** and **Back to library**. Choosing font size or line height opens a preview of your current page:
+Hold A on a page to bookmark it, and a ribbon appears in its top right corner. Hold A again on a bookmarked page to remove the bookmark.
+
+The book menu has **Font size**, **Line height**, **Bookmarks** and **Back to library**. **Bookmarks** lists the pages you've bookmarked, in order, each with its first line of text, starting at the one nearest before your current page:
+
+| Input        | Bookmarks                       |
+|--------------|---------------------------------|
+| Press **A**  | Move selection up               |
+| Press **B**  | Move selection down             |
+| Hold **A**   | Go to the selected page         |
+| Hold **B**   | Back to the book menu           |
+
+Bookmarks mark a place in the text, like your saved place, so they stay with the same words when you change the font size or line height.
+
+Choosing font size or line height opens a preview of your current page:
 
 | Input        | Preview                         |
 |--------------|---------------------------------|
@@ -52,7 +65,7 @@ There are three font sizes (Small, Medium, Large) and four line heights (100% to
 
 Good to know:
 
-- The cache lives in `/books/.cache`, along with the covers, your saved places, font size and line height. It's safe to delete, but books will need indexing again and restart from page 1, and the text settings go back to their defaults.
+- The cache lives in `/books/.cache`, along with the covers, your saved places, bookmarks, font size and line height. It's safe to delete, but books will need indexing again and restart from page 1, your bookmarks are lost, and the text settings go back to their defaults.
 - Covers must be JPEG or PNG. Progressive JPEGs can't be shown, as with wallpapers, so those books show their title instead.
 - Replacing a book with a different file starts it again from page 1.
 - The text of a book has no images. They are skipped, so books made of scanned pages show "This book has no readable text".

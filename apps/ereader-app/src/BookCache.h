@@ -22,6 +22,8 @@ constexpr const char* kSettingsPath = "/books/.cache/settings.bin";
 //                        layout, so going back to a font size already used
 //                        needs no re-indexing.
 //   <stem>.pos           the place last read, which applies to every layout
+//   <stem>.bmk           the bookmarks, as places, so they too apply to every
+//                        layout
 //   <stem>-cover.png     the cover, scaled down for the library; empty if the
 //                        book has no cover that can be shown
 // Reading a page from the .idx is a single seek, so page turns never touch
@@ -30,7 +32,7 @@ constexpr const char* kSettingsPath = "/books/.cache/settings.bin";
 // kSettingsPath is shared by all books.
 //
 // Reading progress must survive firmware updates, which leave the SD card
-// alone. So .pos files, the settings file and cacheStem() are frozen: a new
+// alone. So .pos and .bmk files, the settings file and cacheStem() are frozen: a new
 // firmware has to keep reading what older ones wrote, and test_ereader pins
 // their exact bytes. Indexes and covers can change freely, as they can be
 // rebuilt.
@@ -66,6 +68,11 @@ bool readIndexFooter(paperos::FileSystem& fs, const std::string& stem, uint32_t 
 // 0, the start of the book, if it has not been opened before.
 uint32_t loadPosition(paperos::FileSystem& fs, const std::string& stem);
 bool savePosition(paperos::FileSystem& fs, const std::string& stem, uint32_t position);
+
+// Places bookmarked in a book, in increasing order; empty if there are none.
+std::vector<uint32_t> loadBookmarks(paperos::FileSystem& fs, const std::string& stem);
+bool saveBookmarks(paperos::FileSystem& fs, const std::string& stem,
+                   const std::vector<uint32_t>& positions);
 
 // Text style chosen for every book, as indexes into the app's lists of choices.
 struct ReaderSettings {

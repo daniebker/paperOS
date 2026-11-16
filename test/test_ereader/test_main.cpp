@@ -409,6 +409,14 @@ void finishIndexing(EReaderApp& app) {
   for (int i = 0; i < 1000 && app.view() == EReaderApp::View::Indexing; ++i) app.tick();
 }
 
+// From the book: opens the bookmarks list through the menu.
+void openBookmarks(EReaderApp& app) {
+  app.onInput(InputEvent::Back);
+  app.onInput(InputEvent::Next);
+  app.onInput(InputEvent::Next);
+  app.onInput(InputEvent::Select);
+}
+
 void closeBookToLibrary(EReaderApp& app) {
   app.onInput(InputEvent::Back);      // opens the menu
   app.onInput(InputEvent::Previous);  // wraps round to "Back to library"
@@ -1073,7 +1081,8 @@ void test_page_turns_stop_at_both_ends() {
   TEST_ASSERT_EQUAL(1, app.currentPage());
   TEST_ASSERT_TRUE(app.onInput(InputEvent::Previous));
   TEST_ASSERT_EQUAL(0, app.currentPage());
-  TEST_ASSERT_FALSE(app.onInput(InputEvent::Select));
+  TEST_ASSERT_TRUE(app.onInput(InputEvent::Select));  // bookmarks, staying put
+  TEST_ASSERT_EQUAL(0, app.currentPage());
 }
 
 void test_last_page_is_remembered_across_restarts() {
@@ -1364,6 +1373,125 @@ void test_menu_selection_wraps_and_does_not_turn_pages() {
   TEST_ASSERT_EQUAL(0, app.currentPage());
 }
 
+void test_hold_a_bookmarks_the_page_and_again_removes_it() {
+  Fixture f;
+  EReaderApp app(f.fs, f.display, f.battery);
+  app.onOpen();
+  app.onInput(InputEvent::Select);
+  finishIndexing(app);
+  app.onInput(InputEvent::Next);
+  TEST_ASSERT_FALSE(app.pageBookmarked());
+
+  TEST_ASSERT_TRUE(app.onInput(InputEvent::Select));
+  ASSERT_VIEW(Reading, app);
+  TEST_ASSERT_TRUE(app.pageBookmarked());
+  TEST_ASSERT_EQUAL(1, app.currentPage());
+  app.onInput(InputEvent::Next);
+  TEST_ASSERT_FALSE(app.pageBookmarked());
+  app.onInput(InputEvent::Previous);
+  TEST_ASSERT_TRUE(app.pageBookmarked());
+
+  TEST_ASSERT_TRUE(app.onInput(InputEvent::Select));
+  TEST_ASSERT_FALSE(app.pageBookmarked());
+  TEST_ASSERT_TRUE(loadBookmarks(f.fs, cacheStem("book.epub", uint32_t(f.fs.files[kBookPath].size())))
+                       .empty());
+}
+
+void test_bookmarks_list_jumps_to_the_chosen_page() {
+  Fixture f;
+  f.fs.files[kBookPath] = makeEpub(200);
+  EReaderApp app(f.fs, f.display, f.battery);
+  app.onOpen();
+  app.onInput(InputEvent::Select);
+  finishIndexing(app);
+  for (int i = 0; i < 2; ++i) app.onInput(InputEvent::Next);
+  app.onInput(InputEvent::Select);  // page 3
+  for (int i = 0; i < 5; ++i) app.onInput(InputEvent::Next);
+  app.onInput(InputEvent::Select);  // page 8
+  app.onInput(InputEvent::Next);
+
+  app.onInput(InputEvent::Back);
+  app.draw(f.display);
+  TEST_ASSERT_TRUE(f.display.shows("Bookmarks (2)"));
+  app.onInput(InputEvent::Next);
+  app.onInput(InputEvent::Next);
+  TEST_ASSERT_TRUE(app.selectedMenuItem() == EReaderApp::MenuItem::Bookmarks);
+  TEST_ASSERT_TRUE(app.onInput(InputEvent::Select));
+  ASSERT_VIEW(Bookmarks, app);
+  TEST_ASSERT_TRUE(app.wantsFullRefresh());
+  TEST_ASSERT_EQUAL(2, app.bookmarkedPages().size());
+  TEST_ASSERT_EQUAL(2, app.bookmarkedPages()[0]);
+  TEST_ASSERT_EQUAL(7, app.bookmarkedPages()[1]);
+  TEST_ASSERT_EQUAL(1, app.selectedBookmark());  // the nearest before page 9
+  f.display.beginFrame(Color::White);
+  app.draw(f.display);
+  TEST_ASSERT_TRUE(f.display.shows("Bookmarks"));
+  TEST_ASSERT_TRUE(f.display.shows("Page 3"));
+  TEST_ASSERT_TRUE(f.display.shows("Page 8"));
+  TEST_ASSERT_TRUE(f.display.showsPart("alpha"));
+
+  TEST_ASSERT_TRUE(app.onInput(InputEvent::Next));  // wraps round
+  TEST_ASSERT_EQUAL(0, app.selectedBookmark());
+  TEST_ASSERT_TRUE(app.onInput(InputEvent::Select));
+  ASSERT_VIEW(Reading, app);
+  TEST_ASSERT_EQUAL(2, app.currentPage());
+  TEST_ASSERT_TRUE(app.pageBookmarked());
+
+  // The jump is saved like a page turn.
+  app.onClose();
+  app.onOpen();
+  app.onInput(InputEvent::Select);
+  TEST_ASSERT_EQUAL(2, app.currentPage());
+}
+
+void test_bookmarks_list_back_returns_to_the_menu() {
+  Fixture f;
+  EReaderApp app(f.fs, f.display, f.battery);
+  app.onOpen();
+  app.onInput(InputEvent::Select);
+  finishIndexing(app);
+  app.onInput(InputEvent::Next);
+
+  openBookmarks(app);
+  ASSERT_VIEW(Bookmarks, app);
+  app.draw(f.display);
+  TEST_ASSERT_TRUE(f.display.shows("No bookmarks yet"));
+  TEST_ASSERT_FALSE(app.onInput(InputEvent::Select));
+  TEST_ASSERT_FALSE(app.onInput(InputEvent::Next));
+
+  TEST_ASSERT_TRUE(app.onInput(InputEvent::Back));
+  ASSERT_VIEW(Menu, app);
+  TEST_ASSERT_TRUE(app.selectedMenuItem() == EReaderApp::MenuItem::Bookmarks);
+  app.onInput(InputEvent::Back);
+  ASSERT_VIEW(Reading, app);
+  TEST_ASSERT_EQUAL(1, app.currentPage());
+}
+
+void test_bookmarks_survive_reopening_and_style_changes() {
+  Fixture f;
+  f.fs.files[kBookPath] = makeEpub(200);
+  EReaderApp app(f.fs, f.display, f.battery);
+  app.onOpen();
+  app.onInput(InputEvent::Select);
+  finishIndexing(app);
+  for (int i = 0; i < 6; ++i) app.onInput(InputEvent::Next);
+  app.onInput(InputEvent::Select);
+  const std::string word = firstWordOnPage(app, f.display);
+  app.onInput(InputEvent::Next);
+
+  closeBookToLibrary(app);
+  app.onInput(InputEvent::Select);
+  app.onInput(InputEvent::Previous);
+  TEST_ASSERT_TRUE(app.pageBookmarked());
+
+  changeSetting(app, EReaderApp::MenuItem::FontSize, 2);
+  openBookmarks(app);
+  TEST_ASSERT_EQUAL(1, app.bookmarkedPages().size());
+  app.onInput(InputEvent::Select);
+  TEST_ASSERT_TRUE(app.pageBookmarked());
+  TEST_ASSERT_EQUAL_STRING(word.c_str(), firstWordOnPage(app, f.display).c_str());
+}
+
 void test_preview_shows_the_current_page_and_tracks_changes() {
   Fixture f;
   EReaderApp app(f.fs, f.display, f.battery);
@@ -1640,6 +1768,21 @@ void test_progress_file_format_is_frozen() {
   TEST_ASSERT_EQUAL(0x01020304, loadPosition(fs, "/books/.cache/abc"));
 }
 
+void test_bookmarks_file_format_is_frozen() {
+  MemoryFileSystem fs;
+  fs.dirs["/books"] = true;
+  TEST_ASSERT_TRUE(saveBookmarks(fs, "/books/.cache/abc", {5, 0x01020304}));
+  const std::string expected("PBB1\x05\x00\x00\x00\x04\x03\x02\x01", 12);
+  TEST_ASSERT_TRUE(fs.files["/books/.cache/abc.bmk"] == expected);
+  const std::vector<uint32_t> loaded = loadBookmarks(fs, "/books/.cache/abc");
+  TEST_ASSERT_EQUAL(2, loaded.size());
+  TEST_ASSERT_EQUAL(5, loaded[0]);
+  TEST_ASSERT_EQUAL(0x01020304, loaded[1]);
+
+  fs.files["/books/.cache/abc.bmk"] = "junk";
+  TEST_ASSERT_TRUE(loadBookmarks(fs, "/books/.cache/abc").empty());
+}
+
 void test_book_identity_is_frozen() {
   TEST_ASSERT_EQUAL_STRING("/books/.cache/3b249543", cacheStem("book.epub", 123456).c_str());
 }
@@ -1852,6 +1995,10 @@ int main(int, char**) {
   RUN_TEST(test_long_title_is_shortened_to_fit);
   RUN_TEST(test_hold_b_opens_the_menu_and_closes_it_again);
   RUN_TEST(test_menu_selection_wraps_and_does_not_turn_pages);
+  RUN_TEST(test_hold_a_bookmarks_the_page_and_again_removes_it);
+  RUN_TEST(test_bookmarks_list_jumps_to_the_chosen_page);
+  RUN_TEST(test_bookmarks_list_back_returns_to_the_menu);
+  RUN_TEST(test_bookmarks_survive_reopening_and_style_changes);
   RUN_TEST(test_preview_shows_the_current_page_and_tracks_changes);
   RUN_TEST(test_preview_changes_nothing_until_confirmed);
   RUN_TEST(test_preview_stops_at_both_ends);
@@ -1865,6 +2012,7 @@ int main(int, char**) {
   RUN_TEST(test_cancelling_style_change_indexing_keeps_book_usable);
   RUN_TEST(test_unusable_settings_fall_back_to_the_defaults);
   RUN_TEST(test_progress_file_format_is_frozen);
+  RUN_TEST(test_bookmarks_file_format_is_frozen);
   RUN_TEST(test_book_identity_is_frozen);
   RUN_TEST(test_settings_from_older_firmware_still_load);
   RUN_TEST(test_progress_survives_losing_every_index);

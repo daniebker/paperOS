@@ -20,16 +20,21 @@
 // are read from the books one at a time in tick() and cached on the card.
 //
 // In the library A / B move, hold A opens and hold B returns home. In a book
-// A / B turn pages and hold B opens the menu, where A / B move, hold A selects
-// and hold B returns to the book.
+// A / B turn pages, hold A bookmarks the page (or removes its bookmark) and
+// hold B opens the menu, where A / B move, hold A selects and hold B returns
+// to the book.
+//
+// The bookmarks item lists the bookmarked pages. A / B move, hold A goes to
+// the selected page and hold B returns to the menu. Bookmarks are saved as
+// places in the text, like the last page read, so they survive style changes.
 //
 // The font size and line height items open a preview of the current page. A /
 // B increase and decrease the value, hold A sets it and hold B leaves without
 // saving. The style is remembered for every book.
 class EReaderApp : public paperos::App {
  public:
-  enum class View : uint8_t { Library, Indexing, Reading, Menu, Preview, Error };
-  enum class MenuItem : uint8_t { FontSize, LineHeight, BackToLibrary, Count };
+  enum class View : uint8_t { Library, Indexing, Reading, Menu, Preview, Bookmarks, Error };
+  enum class MenuItem : uint8_t { FontSize, LineHeight, Bookmarks, BackToLibrary, Count };
 
   struct Book {
     std::string fileName;
@@ -68,6 +73,12 @@ class EReaderApp : public paperos::App {
   uint32_t pagesLeft() const { return ereader::pagesRemaining(page_, pageCount()); }
   uint32_t layoutFingerprint() const { return fingerprint_; }
 
+  // Whether the page being read has a bookmark on it.
+  bool pageBookmarked() const;
+  // Zero-based pages listed in the bookmarks view, in order.
+  const std::vector<uint32_t>& bookmarkedPages() const { return bookmarkPages_; }
+  size_t selectedBookmark() const { return selectedBookmark_; }
+
   // Books on one screen of the library.
   size_t booksPerScreen() const { return libraryGrid().perScreen; }
 
@@ -104,12 +115,19 @@ class EReaderApp : public paperos::App {
   void confirmPreview();
   void layoutPreview();
   bool loadPage();
+  std::vector<uint32_t> pagesWithBookmarks() const;
+  void toggleBookmark();
+  void openBookmarks();
+  bool onBookmarksInput(paperos::InputEvent event);
+  size_t bookmarkRowsPerScreen() const;
 
   void drawLibrary(paperos::Display& display);
   void drawIndexing(paperos::Display& display);
   void drawReading(paperos::Display& display);
   void drawMenu(paperos::Display& display);
   void drawPreview(paperos::Display& display);
+  void drawBookmarks(paperos::Display& display);
+  void drawBookmarkRibbon(paperos::Display& display) const;
   void drawPageText(paperos::Display& display, const std::string& text,
                     const ereader::PageMetrics& metrics) const;
   void drawError(paperos::Display& display);
@@ -143,6 +161,10 @@ class EReaderApp : public paperos::App {
   uint32_t page_ = 0;
   std::string pageText_;
   std::string error_;
+
+  std::vector<uint32_t> bookmarks_;      // positions in the text, in order
+  std::vector<uint32_t> bookmarkPages_;  // shown in the bookmarks view
+  size_t selectedBookmark_ = 0;
 
   int fastPageTurns_ = 0;
   bool fullRefreshPending_ = false;

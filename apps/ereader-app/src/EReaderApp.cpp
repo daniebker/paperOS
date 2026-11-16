@@ -22,6 +22,10 @@ constexpr int kCoverGap = 16;         // between covers, both ways
 constexpr int kSelectionBorder = 5;   // drawn in the gap around the cover
 constexpr int kPlaceholderPadding = 6;
 constexpr int kPreviewRowGap = 4;
+// The ribbon on a bookmarked page, in the right margin at the top.
+constexpr int kRibbonW = 14;
+constexpr int kRibbonH = 40;
+constexpr int kRibbonNotch = 7;
 constexpr int kProgressRedrawStep = 10;  // percent; e-paper redraws are slow
 // Fast updates ghost, so clear the panel every so often.
 constexpr int kFastPageTurnsPerFullRefresh = 8;
@@ -113,6 +117,32 @@ std::string progressText(const EReaderApp::Book& book) {
   const uint32_t left = ereader::pagesRemaining(book.page, book.pageCount);
   if (left == 0) return "Finished, " + std::to_string(book.pageCount) + " pages";
   return std::to_string(left) + " of " + std::to_string(book.pageCount) + " pages left";
+}
+
+// The first line of text on a laid-out page, for the bookmarks list.
+std::string firstLine(const std::string& page) {
+  size_t start = 0;
+  while (start < page.size()) {
+    size_t end = page.find('\n', start);
+    if (end == std::string::npos) end = page.size();
+    if (page[start] == ereader::kHeadingMarker) ++start;
+    if (end > start) return page.substr(start, end - start);
+    start = end + 1;
+  }
+  return "";
+}
+
+// Draws the screen's title with the battery level opposite, and a rule
+// under them. Returns the bottom of the header.
+int drawHeader(paperos::Display& display, const paperos::Battery& battery, const char* title) {
+  const int w = display.width();
+  const int titleH = display.textHeight(TextSize::Title);
+  display.drawText(title, kMargin, kMargin, TextSize::Title);
+  const int batteryY = kMargin + (titleH - display.textHeight(TextSize::Small)) / 2;
+  drawBatteryLevel(display, battery, w - kMargin, batteryY, TextAlign::Right);
+  const int headerBottom = kMargin * 2 + titleH;
+  display.fillRect(0, headerBottom - 4, w, 4, Color::Black);
+  return headerBottom;
 }
 
 void drawFooterLegend(paperos::Display& display, const char* legend) {
@@ -277,6 +307,7 @@ void EReaderApp::startReading() {
     return;
   }
   page_ = pages_.pageAt(ereader::loadPosition(fs_, book.stem));
+  bookmarks_ = ereader::loadBookmarks(fs_, book.stem);
   if (loadPage()) view_ = View::Reading;
 }
 
@@ -291,6 +322,8 @@ void EReaderApp::closeBook() {
   indexer_.reset();
   pages_.close();
   pageText_.clear();
+  bookmarks_.clear();
+  bookmarkPages_.clear();
 }
 
 void EReaderApp::backToLibrary() {
@@ -325,6 +358,75 @@ bool EReaderApp::turnPage(int delta) {
   return true;
 }
 
+std::vector<uint32_t> EReaderApp::pagesWithBookmarks() const {
+  // Bookmarks are in order of position, so their pages are too. Two made at
+  // another font size can share a page at this one.
+  std::vector<uint32_t> pages;
+  for (const uint32_t position : bookmarks_) {
+    const uint32_t page = pages_.pageAt(position);
+    if (pages.empty() || pages.back() != page) pages.push_back(page);
+  }
+  return pages;
+}
+
+bool EReaderApp::pageBookmarked() const {
+  return std::any_of(bookmarks_.begin(), bookmarks_.end(),
+                     [this](uint32_t position) { return pages_.pageAt(position) == page_; });
+}
+
+// A bookmark made at another font size may fall anywhere on this page, so
+// removing takes away every bookmark on it.
+void EReaderApp::toggleBookmark() {
+  const auto onPage = [this](uint32_t position) { return pages_.pageAt(position) == page_; };
+  if (pageBookmarked()) {
+    bookmarks_.erase(std::remove_if(bookmarks_.begin(), bookmarks_.end(), onPage),
+                     bookmarks_.end());
+  } else {
+    const uint32_t position = pages_.positionOf(page_);
+    bookmarks_.insert(std::lower_bound(bookmarks_.begin(), bookmarks_.end(), position),
+                      position);
+  }
+  ereader::saveBookmarks(fs_, books_[selected_].stem, bookmarks_);
+}
+
+void EReaderApp::openBookmarks() {
+  view_ = View::Bookmarks;
+  fullRefreshPending_ = true;
+  bookmarkPages_ = pagesWithBookmarks();
+  // Starts at the nearest bookmark before the page being read.
+  selectedBookmark_ = 0;
+  for (size_t i = 0; i < bookmarkPages_.size() && bookmarkPages_[i] <= page_; ++i) {
+    selectedBookmark_ = i;
+  }
+}
+
+bool EReaderApp::onBookmarksInput(InputEvent event) {
+  const size_t count = bookmarkPages_.size();
+  switch (event) {
+    case InputEvent::Previous:
+      if (count == 0) return false;
+      selectedBookmark_ = (selectedBookmark_ + count - 1) % count;
+      return true;
+    case InputEvent::Next:
+      if (count == 0) return false;
+      selectedBookmark_ = (selectedBookmark_ + 1) % count;
+      return true;
+    case InputEvent::Select:
+      if (count == 0) return false;
+      page_ = bookmarkPages_[selectedBookmark_];
+      if (!loadPage()) return true;
+      ereader::savePosition(fs_, books_[selected_].stem, pages_.positionOf(page_));
+      closeMenu();
+      return true;
+    case InputEvent::Back:
+      view_ = View::Menu;
+      fullRefreshPending_ = true;
+      return true;
+    default:
+      return false;
+  }
+}
+
 void EReaderApp::openMenu() {
   view_ = View::Menu;
   menuItem_ = MenuItem::FontSize;
@@ -349,10 +451,10 @@ bool EReaderApp::onMenuInput(InputEvent event) {
       closeMenu();
       return true;
     case InputEvent::Select:
-      if (menuItem_ == MenuItem::BackToLibrary) {
-        backToLibrary();
-      } else {
-        openPreview();
+      switch (menuItem_) {
+        case MenuItem::BackToLibrary: backToLibrary(); break;
+        case MenuItem::Bookmarks: openBookmarks(); break;
+        default: openPreview(); break;
       }
       return true;
     default:
@@ -454,6 +556,10 @@ bool EReaderApp::onInput(InputEvent event) {
     case View::Reading:
       if (event == InputEvent::Previous) return turnPage(-1);
       if (event == InputEvent::Next) return turnPage(1);
+      if (event == InputEvent::Select) {
+        toggleBookmark();
+        return true;
+      }
       if (event == InputEvent::Back) {
         openMenu();
         return true;
@@ -465,6 +571,9 @@ bool EReaderApp::onInput(InputEvent event) {
 
     case View::Preview:
       return onPreviewInput(event);
+
+    case View::Bookmarks:
+      return onBookmarksInput(event);
 
     case View::Indexing:
     case View::Error:
@@ -507,6 +616,7 @@ void EReaderApp::draw(paperos::Display& display) {
     case View::Reading: drawReading(display); break;
     case View::Menu: drawMenu(display); break;
     case View::Preview: drawPreview(display); break;
+    case View::Bookmarks: drawBookmarks(display); break;
     case View::Error: drawError(display); break;
   }
   if (fullRefreshPending_) fastPageTurns_ = 0;
@@ -647,21 +757,30 @@ void EReaderApp::drawReading(paperos::Display& display) {
   drawBatteryLevel(display, battery_, display.width() / 2, footerY, TextAlign::Center);
   display.drawText(remaining.c_str(), display.width() - kMargin, footerY, TextSize::Small,
                    TextAlign::Right, Color::DarkGray);
+  if (pageBookmarked()) drawBookmarkRibbon(display);
+}
+
+// A ribbon hanging from the top of the page, with a notch cut in its end.
+// It sits in the right margin, clear of the text.
+void EReaderApp::drawBookmarkRibbon(paperos::Display& display) const {
+  const int x = display.width() - kMargin + (kMargin - kRibbonW) / 2;
+  display.fillRect(x, 0, kRibbonW, kRibbonH, Color::Black);
+  for (int row = 0; row < kRibbonNotch; ++row) {
+    const int half = row * (kRibbonW / 2) / kRibbonNotch;
+    display.fillRect(x + kRibbonW / 2 - half, kRibbonH - kRibbonNotch + row, 2 * half + 1, 1,
+                     Color::White);
+  }
 }
 
 void EReaderApp::drawMenu(paperos::Display& display) {
   const int w = display.width();
-
-  const int titleH = display.textHeight(TextSize::Title);
-  display.drawText("Menu", kMargin, kMargin, TextSize::Title);
-  const int batteryY = kMargin + (titleH - display.textHeight(TextSize::Small)) / 2;
-  drawBatteryLevel(display, battery_, w - kMargin, batteryY, TextAlign::Right);
-  const int headerBottom = kMargin * 2 + titleH;
-  display.fillRect(0, headerBottom - 4, w, 4, Color::Black);
+  const int headerBottom = drawHeader(display, battery_, "Menu");
 
   const std::string labels[] = {
       std::string("Font size: ") + kFontChoices[fontLevel_].name,
       std::string("Line height: ") + kLineChoices[lineLevel_].name,
+      bookmarks_.empty() ? std::string("Bookmarks")
+                         : "Bookmarks (" + std::to_string(pagesWithBookmarks().size()) + ")",
       "Back to library",
   };
   int y = headerBottom + kMargin;
@@ -675,6 +794,59 @@ void EReaderApp::drawMenu(paperos::Display& display) {
   }
 
   drawFooterLegend(display, "A / B: move    Hold A: select    Hold B: close");
+}
+
+size_t EReaderApp::bookmarkRowsPerScreen() const {
+  const int top = kMargin * 3 + display_.textHeight(TextSize::Title);
+  // Leaves room for the legend, and the count under the list.
+  const int bottom = display_.height() - kMargin - 2 * display_.textHeight(TextSize::Small) - 32;
+  const int rowH = display_.textHeight(TextSize::Large) + display_.textHeight(TextSize::Small) + 24;
+  return size_t(std::max(1, (bottom - top) / (rowH + 8)));
+}
+
+void EReaderApp::drawBookmarks(paperos::Display& display) {
+  const int w = display.width();
+  const int headerBottom = drawHeader(display, battery_, "Bookmarks");
+  int y = headerBottom + kMargin;
+
+  if (bookmarkPages_.empty()) {
+    drawFooterLegend(display, "Hold B: back");
+    display.drawText("No bookmarks yet", w / 2, y, TextSize::Large, TextAlign::Center);
+    display.drawText("Hold A on a page to bookmark it", w / 2,
+                     y + display.textHeight(TextSize::Large) + 16, TextSize::Small,
+                     TextAlign::Center, Color::DarkGray);
+    return;
+  }
+  drawFooterLegend(display, "A / B: move    Hold A: go to page    Hold B: back");
+
+  // One screenful at a time, like the library.
+  const size_t perScreen = bookmarkRowsPerScreen();
+  const size_t first = selectedBookmark_ / perScreen * perScreen;
+  const size_t last = std::min(first + perScreen, bookmarkPages_.size());
+  const int largeH = display.textHeight(TextSize::Large);
+  const int rowH = largeH + display.textHeight(TextSize::Small) + 24;
+  std::string text;
+  for (size_t i = first; i < last; ++i) {
+    const bool selected = i == selectedBookmark_;
+    const Color ink = selected ? Color::White : Color::Black;
+    if (selected) display.fillRect(kMargin / 2, y, w - kMargin, rowH, Color::Black);
+    const uint32_t page = bookmarkPages_[i];
+    const std::string label = "Page " + std::to_string(page + 1);
+    display.drawText(label.c_str(), kMargin * 2, y + 8, TextSize::Large, TextAlign::Left, ink);
+    if (pages_.readPage(page, text)) {
+      const std::string line =
+          fitToWidth(display, firstLine(text), TextSize::Small, w - 4 * kMargin);
+      display.drawText(line.c_str(), kMargin * 2, y + 12 + largeH, TextSize::Small,
+                       TextAlign::Left, selected ? Color::White : Color::DarkGray);
+    }
+    y += rowH + 8;
+  }
+  if (bookmarkPages_.size() > perScreen) {
+    const std::string count =
+        std::to_string(selectedBookmark_ + 1) + " of " + std::to_string(bookmarkPages_.size());
+    display.drawText(count.c_str(), w / 2, y, TextSize::Small, TextAlign::Center,
+                     Color::DarkGray);
+  }
 }
 
 void EReaderApp::drawPreview(paperos::Display& display) {

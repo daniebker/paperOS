@@ -11,6 +11,9 @@ namespace {
 constexpr uint32_t kIndexMagic = 0x32494250;     // "PBI2"; bump when the format changes
 constexpr uint32_t kPositionMagic = 0x32504250;  // "PBP2"
 constexpr uint32_t kSettingsMagic = 0x31534250;  // "PBS1"
+constexpr uint32_t kBookmarksMagic = 0x31424250; // "PBB1"
+// More than anyone needs, and keeps a damaged file from using up memory.
+constexpr size_t kMaxBookmarks = 1000;
 
 // FNV-1a.
 uint32_t hashBytes(const void* data, size_t size, uint32_t hash = 2166136261u) {
@@ -33,6 +36,7 @@ std::string indexPath(const std::string& stem, uint32_t fingerprint) {
 }
 std::string temporaryPath(const std::string& stem) { return stem + ".tmp"; }
 std::string positionPath(const std::string& stem) { return stem + ".pos"; }
+std::string bookmarksPath(const std::string& stem) { return stem + ".bmk"; }
 
 void copyTruncated(char* destination, size_t capacity, const std::string& text) {
   strncpy(destination, text.c_str(), capacity - 1);
@@ -80,6 +84,35 @@ bool savePosition(paperos::FileSystem& fs, const std::string& stem, uint32_t pos
       fs.open(positionPath(stem).c_str(), paperos::FileMode::Write);
   const uint32_t record[2] = {kPositionMagic, position};
   return file && file->write(record, sizeof(record)) == sizeof(record);
+}
+
+// The magic, then each position, all uint32_t.
+std::vector<uint32_t> loadBookmarks(paperos::FileSystem& fs, const std::string& stem) {
+  std::vector<uint32_t> positions;
+  std::unique_ptr<paperos::File> file =
+      fs.open(bookmarksPath(stem).c_str(), paperos::FileMode::Read);
+  uint32_t magic = 0;
+  if (!file || file->read(&magic, sizeof(magic)) != sizeof(magic) || magic != kBookmarksMagic) {
+    return positions;
+  }
+  const size_t count = std::min(size_t(file->size() - sizeof(magic)) / sizeof(uint32_t),
+                                kMaxBookmarks);
+  positions.resize(count);
+  const size_t bytes = count * sizeof(uint32_t);
+  if (count > 0 && file->read(positions.data(), bytes) != bytes) positions.clear();
+  std::sort(positions.begin(), positions.end());
+  positions.erase(std::unique(positions.begin(), positions.end()), positions.end());
+  return positions;
+}
+
+bool saveBookmarks(paperos::FileSystem& fs, const std::string& stem,
+                   const std::vector<uint32_t>& positions) {
+  fs.makeDir(kCacheDir);  // fails harmlessly if it exists
+  std::unique_ptr<paperos::File> file =
+      fs.open(bookmarksPath(stem).c_str(), paperos::FileMode::Write);
+  const size_t bytes = positions.size() * sizeof(uint32_t);
+  return file && file->write(&kBookmarksMagic, sizeof(kBookmarksMagic)) == sizeof(kBookmarksMagic) &&
+         (bytes == 0 || file->write(positions.data(), bytes) == bytes);
 }
 
 ReaderSettings loadSettings(paperos::FileSystem& fs) {

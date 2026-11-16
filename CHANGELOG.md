@@ -6,6 +6,19 @@ All notable changes to paperOS are listed here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- **E-Reader** bookmarks. Hold A on a page to bookmark it, shown by a ribbon
+  in the top right corner, and again to remove it. **Bookmarks** in the book
+  menu (hold B) lists them with each page's first line; hold A on one to go
+  there. They're saved in `/books/.cache` as places in the text, so they
+  survive font size and line height changes.
+
+### Changed
+
+- **E-Reader**: holding A while reading, which did nothing, now bookmarks the
+  page.
+
 ## [1.3.0] - 2026-11-15
 
 ### Added
